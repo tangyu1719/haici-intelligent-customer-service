@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知微</title>
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'><path d='M12 21.5L2.5 16L12 10.5L21.5 16L12 21.5Z' fill='%23d97706' fill-opacity='0.2' stroke='%23d97706' stroke-width='1.5' stroke-linejoin='round'/><path d='M12 16.5L2.5 11L12 5.5L21.5 11L12 16.5Z' fill='%23d97706' fill-opacity='0.5' stroke='%23d97706' stroke-width='1.5' stroke-linejoin='round'/><path d='M12 11.5L2.5 6L12 0.5L21.5 6L12 11.5Z' fill='%23d97706' stroke='%23d97706' stroke-width='1.5' stroke-linejoin='round'/><path d='M12 2.5L13.2 5.5L16 6.5L13.2 7.5L12 10.5L10.8 7.5L8 6.5L10.8 5.5L12 2.5Z' fill='%23ffffff'/></svg>">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.staticfile.net/vue/3.3.4/vue.global.prod.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background: #fdf6e3; color: #363e42; overflow: hidden; margin: 0; padding: 0; }
+        .chat-scroll::-webkit-scrollbar { width: 5px; }
+        .chat-scroll::-webkit-scrollbar-track { background: transparent; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #363e42; opacity: 0.1; border-radius: 10px; }
+        .chat-scroll::-webkit-scrollbar-thumb:hover { background: #d97706; }
+        [v-cloak] { display: none !important; }
+
+        .wave-loader { display: flex; align-items: center; justify-content: center; gap: 4px; height: 24px; }
+        .wave-dot { width: 6px; height: 6px; background-color: #d97706; border-radius: 50%; animation: wave-bounce 1.4s ease-in-out infinite; }
+        .wave-dot:nth-child(1) { animation-delay: -0.32s; }
+        .wave-dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes wave-bounce { 0%, 80%, 100% { transform: scale(0); opacity: 0.4; } 40% { transform: scale(1); opacity: 1; } }
+
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        
+        .recording-pulse { animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+        @keyframes pulse-ring { 0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(217, 119, 6, 0); } 100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); } }
+        
+        .icon-metric { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, rgba(217, 119, 6, 0.1) 0%, rgba(217, 119, 6, 0.05) 100%); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5); }
+    </style>
+</head>
+<body class="h-screen w-screen flex p-2 md:p-4">
+    <div id="app" v-cloak class="flex h-full w-full bg-white rounded-[24px] border border-[#363e42]/5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden">
+
+        <aside :class="isSidebarOpen ? 'w-[180px]' : 'w-[72px]'" class="h-full bg-white border-r border-[#363e42]/5 flex flex-col z-40 shrink-0 transition-all duration-300 relative">
+            <div class="h-16 flex items-center border-b border-[#363e42]/5 bg-white z-50 transition-all duration-300" :class="isSidebarOpen ? 'px-5' : 'justify-center px-0'">
+                <div class="w-8 h-8 bg-gradient-to-br from-[#363e42] to-[#1a1c1d] text-white rounded-[10px] flex items-center justify-center shadow-sm shrink-0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 21.5L2.5 16L12 10.5L21.5 16L12 21.5Z" fill="#d97706" fill-opacity="0.2" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                        <path d="M12 16.5L2.5 11L12 5.5L21.5 11L12 16.5Z" fill="#d97706" fill-opacity="0.5" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                        <path d="M12 11.5L2.5 6L12 0.5L21.5 6L12 11.5Z" fill="#d97706" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                        <path d="M12 2.5L13.2 5.5L16 6.5L13.2 7.5L12 10.5L10.8 7.5L8 6.5L10.8 5.5L12 2.5Z" fill="#ffffff"/>
+                    </svg>
+                </div>
+                <div class="flex flex-col whitespace-nowrap ml-3 transition-opacity duration-300" :class="isSidebarOpen ? 'opacity-100' : 'opacity-0 w-0 hidden'">
+                    <h1 class="text-[14px] font-black tracking-tight text-[#363e42] leading-none">知微 ZHIWEI</h1>
+                </div>
+            </div>
+
+            <div class="py-5 flex-1 bg-[#fcfcfc] overflow-y-auto flex flex-col gap-2">
+                <nav class="flex flex-col gap-2 px-3">
+                    <button @click="currentView = 'chat'" class="w-full flex items-center py-3 rounded-xl transition-all duration-300 shadow-sm relative" :class="currentView === 'chat' ? 'bg-[#363e42] text-white' : 'bg-white border border-[#363e42]/5 text-[#363e42] hover:bg-[#363e42]/5'">
+                        <div class="flex justify-center items-center shrink-0" :class="isSidebarOpen ? 'ml-4' : 'w-full'">
+                            <i class="fas fa-headset" :class="currentView === 'chat' ? 'text-[#d97706]' : ''"></i>
+                        </div>
+                        <span class="text-[12px] font-bold tracking-wide whitespace-nowrap transition-all duration-300 overflow-hidden" :class="isSidebarOpen ? 'ml-3 opacity-100' : 'ml-0 opacity-0 w-0'">电商客服</span>
+                    </button>
+
+                    <button @click="currentView = 'eval'" class="w-full flex items-center py-3 rounded-xl transition-all duration-300 shadow-sm relative" :class="currentView === 'eval' ? 'bg-[#363e42] text-white' : 'bg-white border border-[#363e42]/5 text-[#363e42] hover:bg-[#363e42]/5'">
+                        <div class="flex justify-center items-center shrink-0" :class="isSidebarOpen ? 'ml-4' : 'w-full'">
+                            <i class="fas fa-chart-pie" :class="currentView === 'eval' ? 'text-[#d97706]' : ''"></i>
+                        </div>
+                        <span class="text-[12px] font-bold tracking-wide whitespace-nowrap transition-all duration-300 overflow-hidden" :class="isSidebarOpen ? 'ml-3 opacity-100' : 'ml-0 opacity-0 w-0'">自动评测</span>
+                    </button>
+                </nav>
+            </div>
+
+            <div class="p-3 border-t border-[#363e42]/5 bg-[#fcfcfc] flex items-center justify-center shrink-0">
+                <button @click="isSidebarOpen = !isSidebarOpen" class="w-8 h-8 flex items-center justify-center rounded-lg text-[#363e42]/40 hover:bg-[#363e42]/10 hover:text-[#d97706] transition-colors">
+                    <i class="fas text-[12px] transition-transform duration-300" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+                </button>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col h-full bg-[#fdf6e3]/30 relative z-0">
+            <header class="h-16 border-b border-[#363e42]/5 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0 z-10">
+                <div class="flex items-center gap-3">
+                    <span class="text-[14px] font-black text-[#363e42]">{{ currentView === 'chat' ? '电商客服会话' : '系统自动评测报告' }}</span>
+                </div>
+            </header>
+
+            <transition name="fade" mode="out-in">
+                <div v-if="currentView === 'chat'" class="flex-1 flex flex-col overflow-hidden w-full h-full">
+                    <div class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll" id="chatContainer">
+                        <div v-if="messages.length === 0" class="h-full flex flex-col items-center justify-center text-[#363e42]/30 mt-[-5%]">
+                            <div class="w-20 h-20 mb-6 rounded-2xl bg-gradient-to-br from-[#363e42] to-[#1a1c1d] flex items-center justify-center shadow-lg transform rotate-3">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 21.5L2.5 16L12 10.5L21.5 16L12 21.5Z" fill="#d97706" fill-opacity="0.2" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                                    <path d="M12 16.5L2.5 11L12 5.5L21.5 11L12 16.5Z" fill="#d97706" fill-opacity="0.5" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                                    <path d="M12 11.5L2.5 6L12 0.5L21.5 6L12 11.5Z" fill="#d97706" stroke="#d97706" stroke-width="1.5" stroke-linejoin="round"/>
+                                    <path d="M12 2.5L13.2 5.5L16 6.5L13.2 7.5L12 10.5L10.8 7.5L8 6.5L10.8 5.5L12 2.5Z" fill="#ffffff"/>
+                                </svg>
+                            </div>
+                            <p class="font-black tracking-widest uppercase text-xs opacity-80 text-[#363e42]">智能客服 Agent 已就绪</p>
+                            <p class="text-[11px] font-medium mt-2 opacity-50 text-[#363e42]">支持闲聊、查询订单、库存对比及多模态图片识别</p>
+                        </div>
+
+                        <div v-for="(msg, index) in messages" :key="index" class="flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+                            <div class="max-w-[85%] md:max-w-[75%] flex gap-3" :class="msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'">
+
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm overflow-hidden"
+                                     :class="msg.role === 'user' ? 'bg-[#fcfcfc] border border-[#d97706]/20' : 'bg-[#1a1c1d]'">
+                                     <template v-if="msg.role === 'user'">
+                                         <svg viewBox="0 0 100 100" class="w-full h-full p-1 text-[#d97706]" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M50 10C33.4 10 20 23.4 20 40C20 53.6 29 65 41.6 68.7C33.6 72 23.2 78.4 15.5 86.8C14.3 88 15.1 90 16.8 90H83.2C84.9 90 85.7 88 84.5 86.8C76.8 78.4 66.4 72 58.4 68.7C71 65 80 53.6 80 40C80 23.4 66.6 10 50 10ZM50 20C61.1 20 70 28.9 70 40C70 51.1 61.1 60 50 60C38.9 60 30 51.1 30 40C30 28.9 38.9 20 50 20ZM30.5 45H69.5C69.5 45 68 53 50 53C32 53 30.5 45 30.5 45ZM38 35C38 37.8 35.8 40 33 40C30.2 40 28 37.8 28 35C28 32.2 30.2 30 33 30C35.8 30 38 32.2 38 35ZM72 35C72 37.8 69.8 40 67 40C64.2 40 62 37.8 62 35C62 32.2 64.2 30 67 30C69.8 30 72 32.2 72 35Z"/>
+                                         </svg>
+                                     </template>
+                                     <template v-else>
+                                         <svg viewBox="0 0 100 100" class="w-full h-full p-1.5 text-white" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M80 30H70V20C70 14.5 65.5 10 60 10H40C34.5 10 30 14.5 30 20V30H20C14.5 30 10 34.5 10 40V70C10 75.5 14.5 80 20 80H80C85.5 80 90 75.5 90 70V40C90 34.5 85.5 30 80 30ZM40 20H60V30H40V20ZM35 55C32.2 55 30 52.8 30 50C30 47.2 32.2 45 35 45C37.8 45 40 47.2 40 50C40 52.8 37.8 55 35 55ZM65 55C62.2 55 60 52.8 60 50C60 47.2 62.2 45 65 45C67.8 45 70 47.2 70 50C70 52.8 67.8 55 65 55ZM70 70H30V65C30 60 40 60 50 60C60 60 70 60 70 65V70Z"/>
+                                         </svg>
+                                     </template>
+                                </div>
+
+                                <div class="flex flex-col gap-1" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
+                                    <div class="p-4 rounded-2xl shadow-sm border border-[#363e42]/5 text-[13px] leading-[1.7] whitespace-pre-wrap font-medium break-words"
+                                         :class="msg.role === 'user' ? 'bg-[#d97706]/10 text-[#363e42] rounded-tr-sm' : 'bg-white text-[#363e42]/90 rounded-tl-sm'">
+                                        
+                                        <div v-if="msg.image" class="mb-3">
+                                            <img :src="msg.image" class="max-w-full sm:max-w-[240px] rounded-lg border border-[#363e42]/10 object-contain" />
+                                        </div>
+
+                                        {{ msg.content }}
+
+                                        <div v-if="msg.intent && msg.intent !== 'agent' && msg.intent !== 'chitchat' && msg.intent !== 'error' && msg.intent !== 'image_query'" class="mt-3 pt-3 border-t border-[#363e42]/5 flex items-center gap-2 text-[10px] text-[#d97706] font-bold bg-[#d97706]/5 -mx-4 -mb-4 px-4 py-2.5 rounded-b-2xl">
+                                            <i class="fas fa-wrench"></i> 触发后台技能: {{ msg.intent }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="isWaiting" class="flex w-full justify-start">
+                            <div class="flex gap-3">
+                                <div class="w-10 h-10 rounded-full bg-[#1a1c1d] text-white flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
+                                     <svg viewBox="0 0 100 100" class="w-full h-full p-1.5 text-white" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M80 30H70V20C70 14.5 65.5 10 60 10H40C34.5 10 30 14.5 30 20V30H20C14.5 30 10 34.5 10 40V70C10 75.5 14.5 80 20 80H80C85.5 80 90 75.5 90 70V40C90 34.5 85.5 30 80 30ZM40 20H60V30H40V20ZM35 55C32.2 55 30 52.8 30 50C30 47.2 32.2 45 35 45C37.8 45 40 47.2 40 50C40 52.8 37.8 55 35 55ZM65 55C62.2 55 60 52.8 60 50C60 47.2 62.2 45 65 45C67.8 45 70 47.2 70 50C70 52.8 67.8 55 65 55ZM70 70H30V65C30 60 40 60 50 60C60 60 70 60 70 65V70Z"/>
+                                     </svg>
+                                </div>
+                                <div class="p-4 rounded-2xl rounded-tl-sm bg-white border border-[#363e42]/5 shadow-sm flex items-center h-[46px]">
+                                    <div class="wave-loader">
+                                        <div class="wave-dot"></div>
+                                        <div class="wave-dot"></div>
+                                        <div class="wave-dot"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="p-4 bg-white/80 backdrop-blur-md border-t border-[#363e42]/5 shrink-0 z-10 pb-6">
+                        <div class="max-w-4xl mx-auto flex flex-col relative bg-white border border-[#363e42]/30 rounded-2xl p-2 shadow-sm focus-within:border-[#d97706]/60 focus-within:shadow-[0_0_0_4px_rgba(217,119,6,0.05)] transition-all">
+                            
+                            <div v-if="selectedImage" class="relative w-20 h-20 mb-2 ml-2 mt-2">
+                                <img :src="selectedImage" class="w-full h-full object-cover rounded-xl border border-[#363e42]/20 shadow-sm" />
+                                <button @click="removeImage" class="absolute -top-2 -right-2 bg-[#1a1c1d] text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] shadow-md hover:bg-red-500 transition-colors">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            <div class="flex items-end gap-2">
+                                <input type="file" ref="fileInput" @change="handleImageUpload" accept="image/*" class="hidden" />
+                                
+                                <button @click="triggerUpload" class="w-10 h-10 flex items-center justify-center shrink-0 text-[#363e42]/60 hover:text-[#d97706] hover:bg-[#d97706]/10 rounded-xl transition-colors" title="上传图片">
+                                    <i class="fas fa-image text-[18px]"></i>
+                                </button>
+                                
+                                <textarea v-model="inputText" 
+                                          @keydown.enter.prevent.exact="sendMessage" 
+                                          @input="adjustTextareaHeight"
+                                          rows="1" 
+                                          class="flex-1 max-h-[140px] min-h-[40px] bg-transparent border-none focus:ring-0 resize-none text-[13px] text-[#363e42] py-2.5 px-2 chat-scroll" 
+                                          placeholder=""></textarea>
+
+                                <button @click="toggleRecording" :class="isRecording ? 'text-white bg-[#d97706] recording-pulse' : 'text-[#363e42]/60 hover:text-[#d97706] hover:bg-[#d97706]/10'" class="w-10 h-10 flex items-center justify-center shrink-0 rounded-xl transition-all" title="语音输入">
+                                    <i class="fas fa-microphone text-[18px]"></i>
+                                </button>
+                                          
+                                <button @click="sendMessage" :disabled="(!inputText.trim() && !selectedImage) || isWaiting" class="w-10 h-10 flex items-center justify-center shrink-0 bg-[#363e42] text-white rounded-xl hover:bg-[#22272a] disabled:bg-[#363e42]/20 transition-colors shadow-sm active:scale-95">
+                                    <i class="fas fa-paper-plane text-[13px] ml-[-2px] mt-[2px]"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else class="flex-1 flex flex-col p-6 overflow-y-auto">
+                    <div class="max-w-5xl mx-auto w-full">
+                        <div class="flex items-center justify-end mb-8">
+                            <button @click="runEval" :disabled="isEvalRunning" class="bg-[#363e42] text-white px-5 py-2.5 rounded-xl font-bold text-[13px] hover:bg-[#22272a] disabled:opacity-50 transition flex items-center gap-2 shadow-md active:scale-95">
+                                <i :class="isEvalRunning ? 'fas fa-spinner fa-spin' : 'fas fa-play'"></i>
+                                {{ isEvalRunning ? '正在执行测评...' : '启动全量评测' }}
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div class="bg-white p-5 rounded-2xl border border-[#363e42]/5 shadow-sm flex flex-col justify-between">
+                                <div class="flex items-center gap-3 text-[#363e42]/50 mb-4">
+                                    <div class="icon-metric">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <circle cx="12" cy="12" r="6"></circle>
+                                            <circle cx="12" cy="12" r="2"></circle>
+                                        </svg>
+                                    </div>
+                                    <span class="text-xs font-bold uppercase tracking-wider">意图准确率</span>
+                                </div>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-3xl font-black text-[#363e42]">{{ evalData.intentAccuracy }}</span>
+                                    <span class="text-sm font-bold text-[#363e42]/40" v-if="evalData.intentAccuracy !== '-'">%</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-2xl border border-[#363e42]/5 shadow-sm flex flex-col justify-between">
+                                <div class="flex items-center gap-3 text-[#363e42]/50 mb-4">
+                                    <div class="icon-metric">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                                        </svg>
+                                    </div>
+                                    <span class="text-xs font-bold uppercase tracking-wider">检索召回率</span>
+                                </div>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-3xl font-black text-[#363e42]">{{ evalData.retrievalRecall }}</span>
+                                    <span class="text-sm font-bold text-[#363e42]/40" v-if="evalData.retrievalRecall !== '-'">%</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-2xl border border-[#363e42]/5 shadow-sm flex flex-col justify-between">
+                                <div class="flex items-center gap-3 text-[#363e42]/50 mb-4">
+                                    <div class="icon-metric">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                                            <path d="M2 17l10 5 10-5"></path>
+                                            <path d="M2 12l10 5 10-5"></path>
+                                        </svg>
+                                    </div>
+                                    <span class="text-xs font-bold uppercase tracking-wider">生成质量</span>
+                                </div>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-3xl font-black text-[#d97706]">{{ evalData.generationQuality }}</span>
+                                    <span class="text-xs font-bold text-[#363e42]/40 ml-1" v-if="evalData.generationQuality !== '-'">/ 100</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-5 rounded-2xl border border-[#363e42]/5 shadow-sm flex flex-col justify-between">
+                                <div class="flex items-center gap-3 text-[#363e42]/50 mb-4">
+                                    <div class="icon-metric">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                                        </svg>
+                                    </div>
+                                    <span class="text-xs font-bold uppercase tracking-wider">平均延迟</span>
+                                </div>
+                                <div class="flex items-baseline gap-1">
+                                    <span class="text-3xl font-black text-[#363e42]">{{ evalData.averageLatency }}</span>
+                                    <span class="text-sm font-bold text-[#363e42]/40" v-if="evalData.averageLatency !== '-'">s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+        </main>
+    </div>
+
+<script>
+const { createApp, ref, nextTick, onMounted } = Vue;
+
+const app = createApp({
+    setup() {
+        const isSidebarOpen = ref(true);
+        const currentView = ref('chat');
+        const inputText = ref('');
+        const messages = ref([]);
+        const isWaiting = ref(false);
+        const sessionId = ref('sess_' + Math.random().toString(36).substr(2, 9));
+        
+        const fileInput = ref(null);
+        const selectedImage = ref(null);
+
+        const isRecording = ref(false);
+        let recognition = null;
+
+        const evalData = ref({
+            intentAccuracy: '-',
+            retrievalRecall: '-',
+            generationQuality: '-',
+            averageLatency: '-'
+        });
+        const isEvalRunning = ref(false);
+
+        onMounted(() => {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = 'zh-CN';
+
+                recognition.onstart = () => {
+                    isRecording.value = true;
+                };
+
+                recognition.onresult = (event) => {
+                    let finalTranscript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    if (finalTranscript) {
+                        inputText.value += finalTranscript;
+                        adjustTextareaHeight({ target: document.querySelector('textarea') });
+                    }
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('语音识别出错', event.error);
+                    isRecording.value = false;
+                };
+
+                recognition.onend = () => {
+                    isRecording.value = false;
+                };
+            }
+        });
+
+        const toggleRecording = () => {
+            if (!recognition) {
+                alert("当前浏览器不支持语音识别，请使用新版 Chrome 浏览器");
+                return;
+            }
+            if (isRecording.value) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        };
+
+        const runEval = async () => {
+            if (isEvalRunning.value) return;
+            isEvalRunning.value = true;
+            evalData.value = { intentAccuracy: '-', retrievalRecall: '-', generationQuality: '-', averageLatency: '-' };
+
+            try {
+                const res = await fetch('/eval/run', { method: 'POST' });
+                const data = await res.json();
+                evalData.value = {
+                    intentAccuracy: String(data.intent_accuracy),
+                    retrievalRecall: String(data.retrieval_recall),
+                    generationQuality: String(data.generation_quality),
+                    averageLatency: String(data.avg_latency)
+                };
+            } catch (error) {
+                evalData.value = { intentAccuracy: 'ERR', retrievalRecall: 'ERR', generationQuality: 'ERR', averageLatency: 'ERR' };
+            } finally {
+                isEvalRunning.value = false;
+            }
+        };
+
+        const scrollToBottom = async () => {
+            await nextTick();
+            const container = document.getElementById('chatContainer');
+            if (container) container.scrollTop = container.scrollHeight;
+        };
+
+        const adjustTextareaHeight = (e) => {
+            const el = e.target;
+            if(!el) return;
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+        };
+
+        const triggerUpload = () => {
+            if (fileInput.value) {
+                fileInput.value.click();
+            }
+        };
+
+        const handleImageUpload = (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement("canvas");
+                    let w = img.width, h = img.height;
+                    const max_size = 1024;
+                    if (w > max_size || h > max_size) {
+                        if (w > h) { h = Math.round(h * max_size / w); w = max_size; }
+                        else { w = Math.round(w * max_size / h); h = max_size; }
+                    }
+                    canvas.width = w; canvas.height = h;
+                    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+                    selectedImage.value = canvas.toDataURL("image/jpeg", 0.8);
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+            event.target.value = ""; 
+        };
+
+        const removeImage = () => {
+            selectedImage.value = null;
+        };
+
+        const sendMessage = async () => {
+            const text = inputText.value.trim();
+            const img = selectedImage.value;
+            
+            if ((!text && !img) || isWaiting.value) return;
+
+            messages.value.push({ role: 'user', content: text, image: img });
+            
+            inputText.value = '';
+            selectedImage.value = null;
+            const textarea = document.querySelector('textarea');
+            if (textarea) textarea.style.height = 'auto';
+            
+            isWaiting.value = true;
+            scrollToBottom();
+
+            try {
+                const res = await fetch('/chat/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        question: text, 
+                        session_id: sessionId.value,
+                        image: img
+                    })
+                });
+
+                const data = await res.json();
+                messages.value.push({
+                    role: 'assistant',
+                    content: data.answer || '系统未返回有效结果',
+                    intent: data.intent
+                });
+            } catch (error) {
+                messages.value.push({
+                    role: 'assistant',
+                    content: '网络连接异常，无法连接到后端。请检查 FastAPI 服务是否在运行。',
+                    intent: 'error'
+                });
+            } finally {
+                isWaiting.value = false;
+                scrollToBottom();
+            }
+        };
+
+        return {
+            isSidebarOpen, currentView, inputText, messages, isWaiting,
+            sendMessage, evalData, isEvalRunning, runEval,
+            fileInput, selectedImage, triggerUpload, handleImageUpload, removeImage, adjustTextareaHeight,
+            isRecording, toggleRecording
+        };
+    }
+});
+
+app.mount('#app');
+</script>
+</body>
+</html>
