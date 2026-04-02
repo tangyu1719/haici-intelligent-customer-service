@@ -232,3 +232,12 @@ CUDA_VISIBLE_DEVICES=0 uvicorn main:app --host 0.0.0.0 --port 5050
 ```bash
 python run_eval.py
 ```
+<img width="1916" height="909" alt="6b2ac24ad127e30a85be2fc2ee7cfa07" src="https://github.com/user-attachments/assets/547b5571-e889-4795-ba6f-8013fcacef1a" />
+<img width="1916" height="909" alt="6b2ac24ad127e30a85be2fc2ee7cfa07" src="https://github.com/user-attachments/assets/ae5b97aa-462d-4fc4-aa79-09d137a794bb" />
+<img width="1919" height="907" alt="5613a776fee92bc6057fa0691d4e2147" src="https://github.com/user-attachments/assets/2c6e2a46-ae3a-4abf-8b86-bace6e38ec77" />
+<img width="1919" height="908" alt="c79a48a64c63ea1793ba182ed0cf4537" src="https://github.com/user-attachments/assets/ffe3bb63-0829-4dca-917e-d5eb980a2558" />
+<img width="1914" height="893" alt="536725672352a1e97859a4c4357ff4be" src="https://github.com/user-attachments/assets/cce41098-75f6-4af0-b909-e33b1f4fc68e" />
+
+
+
+
