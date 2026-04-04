@@ -155,16 +155,17 @@ Agent 根据标签自主调用对应工具：业务工具（query_order、cancel
 ## 五、效果展示
 
 ### 聊天界面
+<img width="1916" height="909" alt="023c336ed7a958d5e22caae4e53b488e" src="https://github.com/user-attachments/assets/71c6c6f0-d414-4ac4-9794-5a62fb9a3d83" />
 
 <!-- 在此粘贴聊天界面截图 -->
+<img width="1916" height="909" alt="bc2a8d658d2a521d2ee727942e175a34" src="https://github.com/user-attachments/assets/ba84a4ad-cf1b-4d00-91c6-fad5ab735cfd" />
+<img width="1919" height="907" alt="ae22f094f454510d0f2b9bb760b0d257" src="https://github.com/user-attachments/assets/0bd50709-8528-4922-b562-16eb1cc67e38" />
+<img width="1919" height="908" alt="3a1ae7672ba08266ab1e1ad1d85cc500" src="https://github.com/user-attachments/assets/e79ec9c2-3ba9-4fa4-8904-65e054020a90" />
 
 ### 评测看板
 
 <!-- 在此粘贴评测看板截图 -->
-
-### 对话示例
-
-<!-- 在此粘贴对话示例截图 -->
+<img width="1914" height="893" alt="c068ea7f6daa48fe0722c29e5e00e3e7" src="https://github.com/user-attachments/assets/13fc9be4-0ed6-4165-b2b2-1b25734ac231" />
 
 ---
 
