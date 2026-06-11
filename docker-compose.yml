@@ -1,75 +1,34 @@
-version: '3.8'
-
 services:
   mysql:
-    image: docker.io/library/mysql:8.0
-    container_name: rag-mysql
+    image: mysql:8.0
+    container_name: haici-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: ecommerce123
-      MYSQL_DATABASE: ecommerce
-      MYSQL_CHARSET: utf8mb4
-      MYSQL_COLLATION: utf8mb4_unicode_ci
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: haici_cs
+      MYSQL_USER: haici
+      MYSQL_PASSWORD: haici123
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --skip-character-set-client-handshake
       - --default-authentication-plugin=mysql_native_password
     ports:
       - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/01-init.sql
-      - ./init_data.sql:/docker-entrypoint-initdb.d/02-data.sql
-    restart: always
-    networks:
-      - rag-net
+      - haici_mysql_data:/var/lib/mysql
+      - ./backend/数据库初始化脚本/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    restart: unless-stopped
 
   chroma:
-    image: docker.io/chromadb/chroma:0.4.24
-    container_name: rag-chroma
+    image: chromadb/chroma:0.4.24
+    container_name: haici-chroma
     ports:
       - "8001:8000"
     environment:
       - IS_PERSISTENT=TRUE
     volumes:
-      - chroma_data:/chroma/chroma
-    restart: always
-    networks:
-      - rag-net
-
-  elasticsearch:
-    image: docker.io/elasticsearch/elasticsearch:8.11.1
-    container_name: rag-es
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.http.ssl.enabled=false
-      - cluster.routing.allocation.disk.threshold_enabled=false
-      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
-    ports:
-      - "9200:9200"
-    mem_limit: 3g
-    mem_reservation: 2g
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    restart: always
-    networks:
-      - rag-net
-
-  redis:
-    image: docker.io/library/redis:7-alpine
-    container_name: rag-redis
-    ports:
-      - "6381:6379"
-    restart: always
-    networks:
-      - rag-net
-
-networks:
-  rag-net:
-    driver: bridge
+      - haici_chroma_data:/chroma/chroma
+    restart: unless-stopped
 
 volumes:
-  mysql_data:
-  chroma_data:
-  es_data:
+  haici_mysql_data:
+  haici_chroma_data:
