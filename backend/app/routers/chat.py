@@ -190,8 +190,50 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 )
             )
 
-            # 确定 RAG 检索的 tenant_id：优先使用 payload 中的 kb_id
+            # 确定 RAG 检索的 tenant_id：优先 payload.kb_id，其次自动路由
             tenant_id = str(payload.kb_id) if payload.kb_id else str(user_id)
+            auto_routed = False
+            if not payload.kb_id:
+                try:
+                    from app.models import KnowledgeDocument as KD
+                    from app.models import KnowledgeBase
+
+                    kbs = (
+                        stream_db.query(KnowledgeBase)
+                        .filter(
+                            KnowledgeBase.user_id == user_id,
+                            KnowledgeBase.status == 1,
+                        )
+                        .all()
+                    )
+                    if kbs and len(kbs) > 1:
+                        q_lower = (question or "").lower()
+                        q_kw = set(q_lower.split())
+                        kb_scores: list[tuple[int, float]] = []
+                        for kb in kbs:
+                            docs = (
+                                stream_db.query(KD)
+                                .filter(KD.kb_id == kb.id, KD.status == "ready")
+                                .all()
+                            )
+                            if not docs:
+                                kb_scores.append((kb.id, 0.0))
+                                continue
+                            hits = sum(
+                                1 for d in docs
+                                if any(kw in d.filename.lower() for kw in q_kw)
+                            )
+                            ratio = hits / len(docs) if docs else 0.0
+                            kb_scores.append((kb.id, ratio))
+                        kb_scores.sort(key=lambda x: x[1], reverse=True)
+                        if kb_scores[0][1] >= 0.1:
+                            tenant_id = str(kb_scores[0][0])
+                            auto_routed = True
+                        else:
+                            default = next((kb for kb in kbs if kb.is_default == 1), kbs[0])
+                            tenant_id = str(default.id)
+                except Exception:
+                    pass
             anti_dilution_summary: str | None = None
 
             docs = []
@@ -218,7 +260,8 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 "llm_task_type": task_type,
                 "context_budget_chars": history_char_budget(),
                 "anti_dilution": anti_dilution_summary is not None,
-                "kb_id": payload.kb_id,
+                "kb_id": payload.kb_id or (int(tenant_id) if auto_routed else None),
+                "auto_routed": auto_routed,
                 "pipeline": {
                     "source": pipeline.pipeline_source,
                     "rewritten_query": pipeline.rewritten_query,
