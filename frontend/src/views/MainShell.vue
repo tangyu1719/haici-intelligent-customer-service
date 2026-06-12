@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, loadAuthFromStorage } from '../api/auth'
-import type { ChatSessionItem, KnowledgeBase, KnowledgeBaseBrief, KnowledgeDoc, LlmGatewaySnapshot } from '../types'
+import type { ChatSessionItem, KnowledgeBaseBrief, KnowledgeDoc, LlmGatewaySnapshot } from '../types'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
@@ -191,15 +191,6 @@ const createKb = async (): Promise<void> => {
   }
 }
 
-const deleteKb = async (id: number): Promise<void> => {
-  if (!window.confirm('删除知识库不会删除文档，仅解除关联。确定继续？')) return
-  const res = await fetch(`/api/v1/knowledge-bases/${id}`, { method: 'DELETE', headers: authHeaders() })
-  if (res.ok) {
-    if (selectedKbId.value === id) selectedKbId.value = null
-    await loadKbList()
-    await loadKnowledge()
-  }
-}
 
 const loadSliceMethods = async (): Promise<void> => {
   try {
