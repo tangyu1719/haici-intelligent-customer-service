@@ -10,9 +10,10 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
-
-pytest.importorskip("app")
+# 将 backend 目录加入 sys.path，使 app 可导入
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 
 class TestIntentRecognizer:
@@ -20,36 +21,36 @@ class TestIntentRecognizer:
 
     def test_product_consult_intent(self):
         """产品相关问题应识别为 product_consult"""
-        from app.intent import IntentRecognizer
+        from app.intent import IntentRecognizer, IntentType
 
         recognizer = IntentRecognizer()
         result = recognizer.recognize("我想了解一下你们的产品有什么功能")
-        assert result["intent"] in ("product_consult",)
-        assert "label" in result or result.get("intent") is not None
+        assert result.intent == IntentType.PRODUCT
+        assert result.confidence > 0.5
 
     def test_after_sale_intent(self):
         """售后问题应识别为 after_sale"""
-        from app.intent import IntentRecognizer
+        from app.intent import IntentRecognizer, IntentType
 
         recognizer = IntentRecognizer()
         result = recognizer.recognize("我的订单怎么退货")
-        assert result["intent"] in ("after_sale", "product_consult")
+        assert result.intent == IntentType.AFTER_SALE
 
     def test_chitchat_intent(self):
         """闲聊应识别为 chitchat"""
-        from app.intent import IntentRecognizer
+        from app.intent import IntentRecognizer, IntentType
 
         recognizer = IntentRecognizer()
         result = recognizer.recognize("你好啊")
-        assert result["intent"] in ("chitchat", "product_consult")
+        assert result.intent == IntentType.CHITCHAT
 
     def test_complaint_intent(self):
         """投诉应识别为 complaint"""
-        from app.intent import IntentRecognizer
+        from app.intent import IntentRecognizer, IntentType
 
         recognizer = IntentRecognizer()
-        result = recognizer.recognize("我要投诉你们客服态度太差了")
-        assert result["intent"] in ("complaint",)
+        result = recognizer.recognize("我要投诉你们客服太慢了")
+        assert result.intent == IntentType.COMPLAINT
 
 
 class TestIntentLabels:
