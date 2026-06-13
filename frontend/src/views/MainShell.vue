@@ -82,11 +82,13 @@ const syncExpandedMenus = (): void => {
   const walk = (nodes: MenuNode[]) => {
     for (const n of nodes) {
       // 自动展开包含当前路由的父菜单
-      if (n.children?.some((c) => c.path === activePath.value || c.children?.some((gc:MenuNode) => gc.path === activePath.value))) {
+      if (n.children?.some((c) => c.path === activePath.value || c.children?.some((gc: MenuNode) => gc.path === activePath.value))) {
         next.add(n.id)
       }
-      // 默认展开Agent设置菜单
-      if (n.id === 120) next.add(n.id)
+      // 默认展开所有含子菜单的目录（知识库 / Agent设置 等），避免二级菜单被折叠隐藏
+      if (n.menu_type === 'M' && (n.children?.length ?? 0) > 0) {
+        next.add(n.id)
+      }
       if (n.children?.length) walk(n.children)
     }
   }
@@ -542,15 +544,34 @@ onMounted(async () => {
               v-if="isSidebarOpen && expandedMenuIds.has(node.id)"
               class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
             >
-              <router-link
-                v-for="child in node.children.filter((c) => c.menu_type === 'C' && c.path)"
-                :key="child.id"
-                :to="child.path || '/'"
-                class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
-                :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
-              >
-                {{ child.name }}
-              </router-link>
+              <template v-for="child in node.children" :key="child.id">
+                <!-- 子目录（三级菜单父节点） -->
+                <div v-if="child.menu_type === 'M' && child.children?.length" class="flex flex-col gap-0.5">
+                  <button
+                    class="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all hover:bg-[#363e42]/5"
+                    :class="isChildMenuActive(child) ? 'text-[#d97706]' : 'text-[#64748b]'"
+                    @click="toggleMenuGroup(child.id)"
+                  >
+                    <span>{{ child.name }}</span>
+                    <i class="fas text-[9px]" :class="expandedMenuIds.has(child.id) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
+                  </button>
+                  <div v-if="expandedMenuIds.has(child.id)" class="ml-2 pl-2 border-l border-[#363e42]/8 flex flex-col gap-0.5">
+                    <router-link
+                      v-for="gc in child.children.filter((c:MenuNode) => c.menu_type === 'C' && c.path)"
+                      :key="gc.id" :to="gc.path || '/'"
+                      class="w-full flex items-center py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all"
+                      :class="activePath === gc.path ? 'bg-[#363e42] text-white' : 'text-[#64748b] hover:bg-[#363e42]/5'"
+                    >{{ gc.name }}</router-link>
+                  </div>
+                </div>
+                <!-- 叶子节点 -->
+                <router-link
+                  v-else-if="child.menu_type === 'C' && child.path"
+                  :to="child.path || '/'"
+                  class="w-full flex items-center py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all"
+                  :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
+                >{{ child.name }}</router-link>
+              </template>
             </div>
           </div>
           <router-link
