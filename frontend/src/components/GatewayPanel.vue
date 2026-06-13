@@ -48,11 +48,28 @@ watch(() => editingNode.value?.provider, (prov) => {
   if (!editingNode.value.model || editingNode.value.model === PROVIDERS.find(p => p.key !== prov)?.defaultModel) editingNode.value.model = def.defaultModel
 })
 
+interface NodeHealth { node_id: string; state: string; fail_count: number; is_available: boolean; total_requests: number; total_failures: number; failure_rate: number; degrade_count: number; last_fail_reason: string; history: {time:string;state:string;message:string}[] }
+const nodeHealth = ref<Record<string,NodeHealth>>({})
+
 // ═══ API ═══
 async function loadNodes() {
   const r = await fetch('/api/v1/settings/gateway-nodes', { headers: authHeaders() })
   if (r.ok) nodes.value = (await r.json()).nodes || []
 }
+async function loadHealth() {
+  try {
+    const r = await fetch('/api/v1/settings/gateway-nodes/health', { headers: authHeaders() })
+    if (r.ok) {
+      const list = (await r.json()).nodes || []
+      const m: Record<string,NodeHealth> = {}
+      for (const n of list) m[n.node_id] = n
+      nodeHealth.value = m
+    }
+  } catch { /* ignore */ }
+}
+async function recoverNode(id: string) { await fetch(`/api/v1/settings/gateway-nodes/${encodeURIComponent(id)}/health/recover`, { method:'POST', headers:authHeaders() }); await loadHealth() }
+async function degradeNode(id: string) { await fetch(`/api/v1/settings/gateway-nodes/${encodeURIComponent(id)}/health/degrade`, { method:'POST', headers:authHeaders() }); await loadHealth() }
+const healthStateLabel = (s: string) => ({ active: '正常', degraded: '已熔断', half_open: '半开探测' } as Record<string,string>)[s] || s
 function startAdd() { editingNode.value = emptyNode(); selectedProvider.value = PROVIDERS[0]; showForm.value = true; testResult.value = null; saveMsg.value = '' }
 function startEdit(n: GatewayNode) { editingNode.value = { ...n, tags: [...n.tags] }; selectedProvider.value = PROVIDERS.find(p => p.key === n.provider) || PROVIDERS[0]; showForm.value = true; testResult.value = null; saveMsg.value = '' }
 function cancelEdit() { showForm.value = false; testResult.value = null; saveMsg.value = '' }
@@ -74,11 +91,32 @@ async function moveNode(idx: number, dir: -1|1) {
 async function testConnection() {
   if (!editingNode.value) return; testBusy.value = true; testResult.value = null
   try {
-    const r = await fetch('/api/v1/settings/test-connection', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ provider: selectedProvider.value.key, api_key: editingNode.value.api_key, base_url: editingNode.value.base_url, model: editingNode.value.model }) })
-    testResult.value = (await r.json()).result as TestResult
-  } catch { testResult.value = { provider: '', model: '', ok: false, error: '请求失败' } } finally { testBusy.value = false }
+    const prov = selectedProvider.value.key
+    const invokeModel = prov === 'ark' && editingNode.value.endpoint_id?.trim()
+      ? editingNode.value.endpoint_id.trim()
+      : (editingNode.value.model || '').trim()
+    const r = await fetch('/api/v1/settings/test-connection', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        provider: prov,
+        api_key: editingNode.value.api_key,
+        base_url: editingNode.value.base_url,
+        model: invokeModel,
+        endpoint_id: editingNode.value.endpoint_id || '',
+      }),
+    })
+    const data = await r.json()
+    if (!r.ok) {
+      testResult.value = { provider: prov, model: invokeModel, ok: false, error: data.detail || data.error || `HTTP ${r.status}` }
+    } else {
+      testResult.value = (data.result || data) as TestResult
+    }
+  } catch (e: unknown) {
+    testResult.value = { provider: '', model: '', ok: false, error: e instanceof Error ? e.message : '请求失败' }
+  } finally { testBusy.value = false }
 }
-onMounted(() => loadNodes())
+onMounted(() => { loadNodes(); loadHealth() })
 </script>
 
 <template>
@@ -101,13 +139,23 @@ onMounted(() => loadNodes())
               <span class="font-bold text-[13px]">{{ node.name || node.id }}</span>
               <span class="text-[10px] px-2 py-0.5 rounded-full font-bold" :class="node.status==='active'?'bg-green-100 text-green-700':node.status==='degraded'?'bg-amber-100 text-amber-700':'bg-gray-100 text-gray-500'">{{ statusLabel(node.status) }}</span>
               <span class="text-[10px] text-[#64748b] bg-[#f1f5f9] px-2 py-0.5 rounded-full">{{ providerLabel(node.provider) }}</span>
+              <span v-if="nodeHealth[node.id]" class="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                :class="nodeHealth[node.id].state==='active'?'bg-green-100 text-green-700':nodeHealth[node.id].state==='half_open'?'bg-yellow-100 text-yellow-700':'bg-red-100 text-red-600'"
+                :title="'失败'+nodeHealth[node.id].fail_count+'次 | '+nodeHealth[node.id].last_fail_reason"
+              >{{ healthStateLabel(nodeHealth[node.id].state) }}</span>
             </div>
-            <div class="text-[11px] text-[#64748b] truncate">{{ node.model }}<span v-if="node.endpoint_id" class="ml-2 text-[#94a3b8]">端点: {{ node.endpoint_id }}</span></div>
+            <div class="text-[11px] text-[#64748b] truncate">{{ node.model }}<span v-if="node.endpoint_id" class="ml-2 text-[#94a3b8]">端点: {{ node.endpoint_id }}</span>
+              <span v-if="nodeHealth[node.id]?.total_requests" class="ml-2 text-[9px] text-[#94a3b8]">
+                请求{{ nodeHealth[node.id].total_requests }}次 | 失败率{{ (nodeHealth[node.id].failure_rate*100).toFixed(1) }}%
+              </span>
+            </div>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button class="text-[11px] px-2 py-1 border rounded" :disabled="idx===0" @click="moveNode(idx,-1)">↑</button>
             <button class="text-[11px] px-2 py-1 border rounded" :disabled="idx===nodes.length-1" @click="moveNode(idx,1)">↓</button>
             <button class="text-[11px] px-3 py-1 border rounded text-[#d97706] font-bold" @click="startEdit(node)">编辑</button>
+            <button v-if="nodeHealth[node.id]?.state==='degraded'" class="text-[10px] px-2 py-1 border rounded text-green-600 font-bold" @click="recoverNode(node.id)" title="强制恢复">恢复</button>
+            <button v-if="nodeHealth[node.id]?.state==='active'" class="text-[10px] px-2 py-1 border rounded text-amber-600 font-bold" @click="degradeNode(node.id)" title="强制降级">降级</button>
             <button class="text-[11px] px-3 py-1 border rounded text-red-500 font-bold" @click="deleteNode(node.id)">删除</button>
           </div>
         </div>

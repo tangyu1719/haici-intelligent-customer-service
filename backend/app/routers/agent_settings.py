@@ -74,6 +74,7 @@ class TestConnectionBody(BaseModel):
     api_key: str = ""
     base_url: str = ""
     model: str = ""
+    endpoint_id: str = ""
 
 
 # ── Agent 目录 ─────────────────────────────────────────────
@@ -176,6 +177,7 @@ def test_llm_connection(body: TestConnectionBody, _user=Depends(get_current_user
         api_key=body.api_key,
         base_url=body.base_url,
         model=body.model,
+        endpoint_id=body.endpoint_id,
     )
     return {"ok": True, "result": result}
 
@@ -205,3 +207,74 @@ def gateway_snapshot(_user=Depends(get_current_user)):
         "node_count": len([n for n in nodes if n.status == "active"]),
         "total_nodes": len(nodes),
     }
+
+
+# ── 熔断器与节点健康 ─────────────────────────────────────────
+
+
+@router.get("/gateway-nodes/health")
+def get_nodes_health(_user=Depends(get_current_user)):
+    """获取所有节点的健康状态（熔断器视角）"""
+    from app.services.gateway_circuit_breaker import breaker
+
+    return {"ok": True, "nodes": breaker.list_all()}
+
+
+@router.post("/gateway-nodes/{node_id}/health/recover")
+def recover_node(node_id: str, _user=Depends(get_current_user)):
+    """手动强制恢复节点"""
+    from app.services.gateway_circuit_breaker import breaker
+
+    health = breaker.get(node_id)
+    if not health:
+        return {"ok": False, "detail": "节点不存在"}
+    health.force_recover()
+    return {"ok": True, "node": health.to_dict()}
+
+
+@router.post("/gateway-nodes/{node_id}/health/degrade")
+def degrade_node(node_id: str, reason: str = "", _user=Depends(get_current_user)):
+    """手动强制降级节点"""
+    from app.services.gateway_circuit_breaker import breaker
+
+    health = breaker.get(node_id)
+    if not health:
+        return {"ok": False, "detail": "节点不存在"}
+    health.force_degrade(reason)
+    return {"ok": True, "node": health.to_dict()}
+
+
+# ── 语义路由测试 ─────────────────────────────────────────────
+
+
+@router.get("/semantic-route/test")
+def test_semantic_route(question: str, _user=Depends(get_current_user)):
+    """测试语义路由：输入问题，返回复杂度评分和目标任务类型"""
+    from app.services.gateway_semantic_router import estimate_complexity, route_by_complexity
+
+    return {
+        "ok": True,
+        "question": question[:200],
+        "complexity_score": estimate_complexity(question),
+        "target_task_type": route_by_complexity(question),
+    }
+
+
+# ── 缓存统计 ─────────────────────────────────────────────────
+
+
+@router.get("/cache/stats")
+def get_cache_stats(_user=Depends(get_current_user)):
+    """获取缓存统计信息"""
+    from app.services.gateway_cache import cache
+
+    return {"ok": True, "stats": cache.stats()}
+
+
+@router.post("/cache/invalidate")
+def invalidate_cache(_user=Depends(get_current_user)):
+    """清除所有缓存"""
+    from app.services.gateway_cache import cache
+
+    count = cache.invalidate()
+    return {"ok": True, "cleared": count}
