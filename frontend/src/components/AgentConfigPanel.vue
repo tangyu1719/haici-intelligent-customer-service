@@ -133,6 +133,10 @@ async function saveRouting() {
   }
 }
 
+function braceVar(v: string): string {
+  return '{' + v + '}'
+}
+
 function nodesStr(key: string): string {
   const v = routing.value[key]
   if (!v) return ''
@@ -212,10 +216,10 @@ onMounted(async () => {
               >{{ KIND_LABELS[selectedMeta.kind] || selectedMeta.kind }}</span>
             </div>
             <div class="mb-3 text-[11px] text-[#64748b]">
-              <span class="font-bold">Agent Key:</span> <code class="bg-[#f1f5f9] px-1 rounded text-[10px]">{{ selectedMeta.agent_key }}</span>
+              <span class="font-bold">Agent Key:</span> <code class="bg-[#f1f5f9] px-1 rounded text-[10px]">{{ selectedMeta.agent_key }}</code>
               <span v-if="selectedMeta.variables?.length" class="ml-4">
                 <span class="font-bold">变量:</span>
-                <code v-for="v in selectedMeta.variables" :key="v" class="bg-[#fef3c7] px-1 rounded text-[10px] ml-1">{{ '{' + v + '}' }}</code>
+                <code v-for="v in selectedMeta.variables" :key="v" class="bg-[#fef3c7] px-1 rounded text-[10px] ml-1">{{ braceVar(v) }}</code>
               </span>
             </div>
 
