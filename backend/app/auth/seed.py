@@ -137,6 +137,44 @@ def sync_knowledge_multimodal_menu(db: Session) -> None:
     db.commit()
 
 
+def sync_structured_processing_menu(db: Session) -> None:
+    """已有库：确保「结构化处理」菜单挂在知识库下。"""
+    parent = db.query(SysMenu).filter(SysMenu.id == 10).first()
+    if not parent:
+        return
+    row = db.query(SysMenu).filter(SysMenu.id == 15).first()
+    if not row:
+        db.add(
+            SysMenu(
+                id=15,
+                parent_id=10,
+                menu_type="C",
+                name="结构化处理",
+                path="/structured",
+                component="StructuredView",
+                permission=None,
+                sort_order=3,
+                platform="haici",
+            )
+        )
+    else:
+        row.parent_id = 10
+        row.menu_type = "C"
+        row.name = "结构化处理"
+        row.path = "/structured"
+        row.component = "StructuredView"
+        row.permission = None
+        row.sort_order = 3
+    for role_code in ("viewer", "admin"):
+        role = db.query(RbacRole).filter(RbacRole.code == role_code).first()
+        if not role:
+            continue
+        exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == role.id, SysRoleMenu.menu_id == 15).first()
+        if not exists:
+            db.add(SysRoleMenu(role_id=role.id, menu_id=15))
+    db.commit()
+
+
 def sync_ops_eval_menu(db: Session) -> None:
     """已有库：运维评测父菜单 + EVAL/用户反馈二级菜单。"""
     parent = db.query(SysMenu).filter(SysMenu.id == 110).first()

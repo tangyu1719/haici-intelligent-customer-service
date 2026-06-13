@@ -19,6 +19,7 @@ from app.routers import (
     knowledge_base,
     multimodal,
     sessions,
+    structured_processing,
     system,
 )
 from app.auth.bootstrap import ensure_auth_ready
@@ -55,6 +56,7 @@ app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
 app.include_router(agent_settings.router, prefix="/api/v1")
 app.include_router(multimodal.router, prefix="/api/v1")
+app.include_router(structured_processing.router, prefix="/api/v1")
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
 _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

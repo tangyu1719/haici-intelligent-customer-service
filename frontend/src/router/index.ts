@@ -6,6 +6,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/chat', name: 'chat', component: () => import('../views/MainShell.vue'), meta: { permission: 'chat:view' } },
   { path: '/knowledge', name: 'knowledge', component: () => import('../views/MainShell.vue'), meta: { permission: 'kb:view' } },
   { path: '/multimodal', name: 'multimodal', component: () => import('../views/MainShell.vue'), meta: { permission: 'kb:view' } },
+  { path: '/structured', name: 'structured', component: () => import('../views/MainShell.vue'), meta: { permission: 'kb:view' } },
   { path: '/sessions', name: 'sessions', component: () => import('../views/MainShell.vue'), meta: { permission: 'session:view' } },
   { path: '/profile', name: 'profile', component: () => import('../views/MainShell.vue'), meta: { permission: 'profile:view' } },
   { path: '/profile/feedback', name: 'profile-feedback', component: () => import('../views/MainShell.vue'), meta: { permission: 'profile:feedback:view' } },

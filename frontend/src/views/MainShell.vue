@@ -11,6 +11,7 @@ import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
 import ListPagination from '../components/ListPagination.vue'
 import ListQueryBar from '../components/ListQueryBar.vue'
 import MultimodalPanel from '../components/MultimodalPanel.vue'
+import StructuredPanel from '../components/StructuredPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 
@@ -102,6 +103,7 @@ const pageTitle = computed(() => {
     '/chat': '智能客服会话',
     '/knowledge': '知识库管理',
     '/multimodal': '多模态文档处理',
+    '/structured': '结构化处理',
     '/sessions': '会话历史',
     '/profile': '基本资料',
     '/profile/feedback': '回答反馈记录',
@@ -574,6 +576,7 @@ onMounted(async () => {
       <ChatPanel v-if="route.path === '/chat'" />
 
       <MultimodalPanel v-else-if="route.path === '/multimodal'" />
+      <StructuredPanel v-else-if="route.path === '/structured'" />
 
       <div v-else-if="route.path === '/knowledge'" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-5xl mx-auto">
