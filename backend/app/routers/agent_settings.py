@@ -86,8 +86,9 @@ def agents_catalog(_user=Depends(get_current_user)):
     return {
         "agents": list_agent_catalog(),
         "groups": {
-            "multimodal_image": "多模态·图片理解",
-            "doc_normalize": "文档标准化",
+            "multimodal_image": "多模态图片理解（VLM/OCR+LLM）",
+            "doc_normalize": "文档标准化与摘要",
+            "chat_agent": "AI 问答与运维",
         },
         "labels": labels,
     }
