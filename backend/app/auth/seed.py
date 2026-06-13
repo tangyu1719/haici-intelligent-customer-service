@@ -187,7 +187,7 @@ def sync_agent_settings_menu(db: Session) -> None:
     # 二级: Agent配置(叶子) + Agent网关(目录)
     l2 = [
         (121, "Agent配置", "/admin/agent-config", "AgentConfigView", "system:agent:config", 1, "C"),
-        (122, "Agent网关", "", "", "system:agent:gateway", 2, "M"),
+        (122, "Agent网关", "", "", None, 2, "M"),
     ]
     for mid, name, path, comp, perm, sort, mtype in l2:
         row = db.query(SysMenu).filter(SysMenu.id == mid).first()
