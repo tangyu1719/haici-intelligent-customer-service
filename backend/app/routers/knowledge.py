@@ -248,6 +248,14 @@ async def upload(
     db.add(doc)
     db.commit()
     db.refresh(doc)
+
+    # 创建多模态任务追踪
+    from app.services.multimodal_task_manager import create_task, update_task
+    task = create_task(filename=doc.filename, file_path=str(path),
+                       document_id=doc.id, tenant_id=current_user.id)
+    task_id = task["task_id"]
+    update_task(task_id, status="running")
+
     try:
         summary = ingest_uploaded_document(
             path,
@@ -255,12 +263,15 @@ async def upload(
             document_name=doc.filename,
             tenant_id=current_user.id,
             slice_method=mode,
+            task_id=task_id,
         )
         doc.status = "ready"
         doc.chunk_count = int(summary.get("chunk_count") or 0)
     except Exception as exc:  # noqa: BLE001
         doc.status = "failed"
         doc.error_message = str(exc)[:500]
+        from app.services.multimodal_task_manager import update_task as _ut
+        _ut(task_id, status="failed", error=str(exc)[:300])
     db.commit()
     db.refresh(doc)
     return _doc_to_item(doc)

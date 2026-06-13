@@ -18,6 +18,7 @@ from app.routers import (
     knowledge,
     knowledge_base,
     multimodal,
+    multimodal_tasks,
     sessions,
     structured_processing,
     system,
@@ -56,6 +57,7 @@ app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(system.router, prefix="/api/v1")
 app.include_router(agent_settings.router, prefix="/api/v1")
 app.include_router(multimodal.router, prefix="/api/v1")
+app.include_router(multimodal_tasks.router, prefix="/api/v1")
 app.include_router(structured_processing.router, prefix="/api/v1")
 
 _OUTPUT_DIR = PROJECT_ROOT / "output"
