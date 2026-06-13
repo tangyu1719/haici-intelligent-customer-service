@@ -17,6 +17,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/admin/eval', name: 'admin-eval', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:eval:view' } },
   { path: '/admin/agent-config', name: 'admin-agent-config', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:config' } },
   { path: '/admin/agent-gateway', name: 'admin-agent-gateway', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:gateway' } },
+  { path: '/admin/gateway-security', name: 'admin-gateway-security', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:security' } },
+  { path: '/admin/gateway-cache', name: 'admin-gateway-cache', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:cache' } },
+  { path: '/admin/gateway-circuit', name: 'admin-gateway-circuit', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:circuit' } },
   { path: '/admin/feedback', name: 'admin-feedback', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:feedback:view' } },
   { path: '/403', name: 'forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { public: true } },
 ]

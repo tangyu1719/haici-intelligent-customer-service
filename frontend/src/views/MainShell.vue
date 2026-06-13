@@ -5,6 +5,9 @@ import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, loadAuthF
 import type { ChatSessionItem, KnowledgeBaseBrief, KnowledgeDoc, LlmGatewaySnapshot } from '../types'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
 import GatewayPanel from '../components/GatewayPanel.vue'
+import GatewaySecurityPanel from '../components/GatewaySecurityPanel.vue'
+import GatewayCachePanel from '../components/GatewayCachePanel.vue'
+import GatewayCircuitPanel from '../components/GatewayCircuitPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
 import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
@@ -114,6 +117,9 @@ const pageTitle = computed(() => {
     '/admin/eval': 'EVAL 评测',
     '/admin/agent-config': 'Agent 配置',
     '/admin/agent-gateway': 'Agent 网关',
+    '/admin/gateway-security': '安全合规',
+    '/admin/gateway-cache': '缓存管理',
+    '/admin/gateway-circuit': '熔断监控',
     '/admin/feedback': '用户反馈',
   }
   return map[route.path] || 'HaiCi 智能客服'
@@ -786,6 +792,9 @@ onMounted(async () => {
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
+      <GatewaySecurityPanel v-else-if="route.path === '/admin/gateway-security'" class="flex-1 overflow-y-auto" />
+      <GatewayCachePanel v-else-if="route.path === '/admin/gateway-cache'" class="flex-1 overflow-y-auto" />
+      <GatewayCircuitPanel v-else-if="route.path === '/admin/gateway-circuit'" class="flex-1 overflow-y-auto" />
 
       <div v-else-if="route.path.startsWith('/admin/logs/')" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-6xl mx-auto bg-white rounded-2xl border overflow-hidden">

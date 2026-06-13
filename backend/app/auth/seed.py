@@ -283,6 +283,9 @@ def sync_agent_settings_menu(db: Session) -> None:
     children = [
         (121, "Agent配置", "/admin/agent-config", "AgentConfigView", "system:agent:config", 1),
         (122, "Agent网关", "/admin/agent-gateway", "AgentGatewayView", "system:agent:gateway", 2),
+        (123, "安全合规", "/admin/gateway-security", "GatewaySecurityView", "system:agent:security", 3),
+        (124, "缓存管理", "/admin/gateway-cache", "GatewayCacheView", "system:agent:cache", 4),
+        (125, "熔断监控", "/admin/gateway-circuit", "GatewayCircuitView", "system:agent:circuit", 5),
     ]
     for mid, name, path, comp, perm, sort in children:
         row = db.query(SysMenu).filter(SysMenu.id == mid).first()
@@ -312,7 +315,7 @@ def sync_agent_settings_menu(db: Session) -> None:
         role = db.query(RbacRole).filter(RbacRole.code == role_code).first()
         if not role:
             continue
-        for mid in (120, 121, 122):
+        for mid in (120, 121, 122, 123, 124, 125):
             exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == role.id, SysRoleMenu.menu_id == mid).first()
             if not exists:
                 db.add(SysRoleMenu(role_id=role.id, menu_id=mid))
