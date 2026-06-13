@@ -81,9 +81,12 @@ const syncExpandedMenus = (): void => {
   const next = new Set<number>()
   const walk = (nodes: MenuNode[]) => {
     for (const n of nodes) {
-      if (n.children?.some((c) => c.path === activePath.value)) {
+      // 自动展开包含当前路由的父菜单
+      if (n.children?.some((c) => c.path === activePath.value || c.children?.some((gc:MenuNode) => gc.path === activePath.value))) {
         next.add(n.id)
       }
+      // 默认展开Agent设置菜单
+      if (n.id === 120) next.add(n.id)
       if (n.children?.length) walk(n.children)
     }
   }
@@ -141,7 +144,7 @@ const loadMenus = async (): Promise<void> => {
   if (res.ok) {
     const data = await res.json()
     menus.value = data.items || []
-    syncExpandedMenus()
+    setTimeout(() => syncExpandedMenus(), 100)
   }
 }
 
