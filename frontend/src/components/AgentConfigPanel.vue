@@ -18,8 +18,6 @@ const msg = ref('')
 const catalog = ref<AgentCatalogItem[]>([])
 const selectedKey = ref('')
 const mdContent = ref('')
-const routing = ref<Record<string, { mode: string; nodes: string[] | string }>>({})
-
 const GROUP_LABELS: Record<string, string> = {
   multimodal_image_vlm: 'VLM 图片理解（视觉语言模型直接描述图片）',
   multimodal_image_ocr: 'OCR + LLM 图片描述（OCR提取文字 → LLM合成描述）',
@@ -54,18 +52,6 @@ async function loadCatalog() {
   const r = await fetch('/api/v1/settings/agents/catalog', { headers: authHeaders() })
   const d = await r.json()
   catalog.value = d.agents || []
-}
-
-async function loadRouting() {
-  const r = await fetch('/api/v1/settings/agent-routing', { headers: authHeaders() })
-  const d = await r.json()
-  const rules: Record<string, { mode: string; nodes: string[] | string }> = { ...(d.rules || {}) }
-  for (const a of catalog.value) {
-    if (!rules[a.agent_key]) {
-      rules[a.agent_key] = { mode: 'system_compete', nodes: [] }
-    }
-  }
-  routing.value = rules
 }
 
 async function loadMd(key: string) {
@@ -105,57 +91,14 @@ async function saveMd() {
   }
 }
 
-async function saveRouting() {
-  loading.value = true
-  msg.value = ''
-  try {
-    const rules: Record<string, { mode: string; nodes: string[] }> = {}
-    for (const [k, v] of Object.entries(routing.value)) {
-      const nodes = Array.isArray(v.nodes)
-        ? v.nodes
-        : String(v.nodes || '')
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean)
-      rules[k] = { mode: v.mode || 'system_compete', nodes }
-    }
-    const r = await fetch('/api/v1/settings/agent-routing/save', {
-      method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rules }),
-    })
-    if (!r.ok) throw new Error('路由保存失败')
-    msg.value = '路由已保存'
-  } catch (e: unknown) {
-    msg.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    loading.value = false
-  }
-}
-
 function braceVar(v: string): string {
   return '{' + v + '}'
-}
-
-function nodesStr(key: string): string {
-  const v = routing.value[key]
-  if (!v) return ''
-  if (Array.isArray(v.nodes)) return v.nodes.join(', ')
-  return String(v.nodes || '')
-}
-
-function setNodes(key: string, raw: string) {
-  if (!routing.value[key]) {
-    routing.value[key] = { mode: 'system_compete', nodes: [] }
-  }
-  routing.value[key].nodes = raw
 }
 
 onMounted(async () => {
   loading.value = true
   try {
     await loadCatalog()
-    await loadRouting()
     if (catalog.value.length) {
       selectedKey.value = catalog.value[0].agent_key
       await loadMd(selectedKey.value)
@@ -241,33 +184,6 @@ onMounted(async () => {
           </template>
           <div v-else class="text-center py-16 text-[#64748b] text-sm">请从左侧选择一个 Agent</div>
 
-          <!-- 路由配置 -->
-          <details class="mt-6 border-t pt-4">
-            <summary class="text-[12px] font-bold text-[#64748b] cursor-pointer">Agent 路由规则（控制各 Agent 使用哪个网关节点）</summary>
-            <div class="mt-3 space-y-2">
-              <div
-                v-for="a in catalog"
-                :key="'rt-' + a.agent_key"
-                class="grid grid-cols-[160px_140px_1fr] gap-2 items-center text-[11px]"
-              >
-                <span class="truncate font-medium">{{ a.label }}</span>
-                <select v-model="routing[a.agent_key].mode" class="border rounded px-2 py-1 text-[11px]">
-                  <option value="system_compete">全局竞争</option>
-                  <option value="custom_order">自定义顺序</option>
-                  <option value="strict_priority">严格优先级</option>
-                </select>
-                <input
-                  class="border rounded px-2 py-1 text-[11px]"
-                  :value="nodesStr(a.agent_key)"
-                  placeholder="节点ID(逗号分隔)"
-                  @input="setNodes(a.agent_key, ($event.target as HTMLInputElement).value)"
-                />
-              </div>
-              <button type="button" class="bg-[#363e42] text-white px-4 py-1.5 rounded-lg text-[11px] font-bold disabled:opacity-50" :disabled="loading" @click="saveRouting">
-                保存路由规则
-              </button>
-            </div>
-          </details>
         </main>
       </div>
     </div>

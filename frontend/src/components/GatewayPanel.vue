@@ -51,6 +51,13 @@ watch(() => editingNode.value?.provider, (prov) => {
 interface NodeHealth { node_id: string; state: string; fail_count: number; is_available: boolean; total_requests: number; total_failures: number; failure_rate: number; degrade_count: number; last_fail_reason: string; history: {time:string;state:string;message:string}[] }
 const nodeHealth = ref<Record<string,NodeHealth>>({})
 
+// ── Agent 路由规则（集成到网关面板） ──
+interface AgentCatalogItem { agent_key: string; label: string; group: string; kind: string }
+interface AgentRouteRule { mode: string; nodes: string[] }
+const agentCatalog = ref<AgentCatalogItem[]>([])
+const agentRouting = ref<Record<string, AgentRouteRule>>({})
+const routingMsg = ref('')
+
 // ═══ API ═══
 async function loadNodes() {
   const r = await fetch('/api/v1/settings/gateway-nodes', { headers: authHeaders() })
@@ -116,7 +123,37 @@ async function testConnection() {
     testResult.value = { provider: '', model: '', ok: false, error: e instanceof Error ? e.message : '请求失败' }
   } finally { testBusy.value = false }
 }
-onMounted(() => { loadNodes(); loadHealth() })
+// ── Agent路由 ──
+async function loadRouting() {
+  try {
+    const [catR, rtR] = await Promise.all([
+      fetch('/api/v1/settings/agents/catalog', { headers: authHeaders() }),
+      fetch('/api/v1/settings/agent-routing', { headers: authHeaders() }),
+    ])
+    if (catR.ok) agentCatalog.value = (await catR.json()).agents || []
+    if (rtR.ok) {
+      const rules = (await rtR.json()).rules || {}
+      agentRouting.value = {}
+      for (const a of agentCatalog.value) {
+        agentRouting.value[a.agent_key] = rules[a.agent_key] || { mode: 'system_compete', nodes: [] }
+      }
+    }
+  } catch { /* ignore */ }
+}
+async function saveRouting() {
+  routingMsg.value = ''
+  const rules: Record<string, {mode:string;nodes:string[]}> = {}
+  for (const a of agentCatalog.value) {
+    const r = agentRouting.value[a.agent_key]
+    if (!r) continue
+    const nodes = Array.isArray(r.nodes) ? r.nodes : String(r.nodes||'').split(',').map(s=>s.trim()).filter(Boolean)
+    rules[a.agent_key] = { mode: r.mode || 'system_compete', nodes }
+  }
+  const r = await fetch('/api/v1/settings/agent-routing/save', { method:'POST', headers: authHeaders(), body: JSON.stringify({ rules }) })
+  routingMsg.value = r.ok ? '路由规则已保存' : '保存失败'
+}
+
+onMounted(() => { loadNodes(); loadHealth(); loadRouting() })
 </script>
 
 <template>
@@ -208,6 +245,54 @@ onMounted(() => { loadNodes(); loadHealth() })
           <button class="border-2 border-[#e2e8f0] px-6 py-2.5 rounded-xl text-[13px] font-bold disabled:opacity-50" :disabled="testBusy" @click="testConnection">{{ testBusy?'测试中...':'测试连接' }}</button>
           <button class="text-[#94a3b8] text-[13px] px-4 py-2.5" @click="cancelEdit">取消</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══ Agent 路由规则 ═══ -->
+    <div class="mt-8 border-t pt-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-[15px] font-bold">Agent 路由规则</h3>
+          <p class="text-[11px] text-[#64748b]">配置每个 Agent 使用哪个网关节点处理请求。没有配置节点的 Agent 走全局竞争模式。</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span v-if="routingMsg" class="text-[11px] font-bold" :class="routingMsg.includes('失败')?'text-red-500':'text-green-600'">{{ routingMsg }}</span>
+          <button class="bg-[#2563eb] text-white px-4 py-2 rounded-lg font-bold text-[12px]" @click="saveRouting">保存路由规则</button>
+        </div>
+      </div>
+      <div class="border rounded-xl overflow-hidden">
+        <table class="w-full text-[12px]">
+          <thead class="bg-[#f8fafc] text-[#64748b]">
+            <tr>
+              <th class="p-3 text-left w-[180px]">Agent</th>
+              <th class="p-3 text-left w-[140px]">路由模式</th>
+              <th class="p-3 text-left">指定节点</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in agentCatalog" :key="a.agent_key" class="border-t hover:bg-[#f8fafc]">
+              <td class="p-3">
+                <span class="font-bold">{{ a.label }}</span>
+                <span class="text-[10px] ml-1.5 px-1.5 py-0.5 rounded-full" :class="a.kind==='vlm'?'bg-purple-100 text-purple-600':'bg-blue-100 text-blue-600'">{{ a.kind.toUpperCase() }}</span>
+              </td>
+              <td class="p-3">
+                <select v-model="agentRouting[a.agent_key].mode" class="border rounded px-2 py-1.5 text-[11px] w-full">
+                  <option value="system_compete">全局竞争（自动选最优）</option>
+                  <option value="custom_order">自定义顺序</option>
+                  <option value="strict_priority">严格优先级</option>
+                </select>
+              </td>
+              <td class="p-3">
+                <input
+                  :value="Array.isArray(agentRouting[a.agent_key]?.nodes) ? (agentRouting[a.agent_key].nodes as string[]).join(', ') : ''"
+                  class="border rounded px-2 py-1.5 text-[11px] w-full font-mono"
+                  :placeholder="nodes.length ? nodes.map(n=>n.id).join(', ') : 'node_id, ...'"
+                  @input="(e) => { if(!agentRouting[a.agent_key]) agentRouting[a.agent_key] = {mode:'system_compete',nodes:[]}; agentRouting[a.agent_key].nodes = (e.target as HTMLInputElement).value.split(',').map(s=>s.trim()).filter(Boolean) }"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
