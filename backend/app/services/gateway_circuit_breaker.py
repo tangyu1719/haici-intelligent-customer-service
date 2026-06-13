@@ -53,13 +53,14 @@ class NodeHealth:
             self.state = NodeState.ACTIVE
             self._add_event("半开探测成功，恢复为active")
 
-    def record_failure(self, error_code: ErrorCode, detail: str = "") -> None:
+    def record_failure(self, error_code, detail: str = "") -> None:
+        code_val = error_code.value if isinstance(error_code, ErrorCode) else str(error_code)
         self.total_requests += 1
         self.total_failures += 1
         self.fail_count += 1
         self.last_fail_time = time.time()
-        self.last_fail_reason = f"{error_code.value}: {detail[:100]}"
-        self._add_event(f"失败 [{error_code.value}]: {detail[:100]}")
+        self.last_fail_reason = f"{code_val}: {detail[:100]}"
+        self._add_event(f"失败 [{code_val}]: {detail[:100]}")
 
         if self.state == NodeState.ACTIVE and self.fail_count >= self.fail_threshold:
             self.state = NodeState.DEGRADED

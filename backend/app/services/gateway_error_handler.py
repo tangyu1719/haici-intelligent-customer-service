@@ -139,8 +139,11 @@ def normalize_error(provider: str, status_code: int, response_body: str, excepti
         # 400 可能是多种错误，需要进一步分析
         pass
 
+    # Claude overloaded 返回 529 实际是配额/容量问题
+    if status_code == 529:
+        return ErrorCode.LLM_QUOTA, "服务过载，可重试或切换节点 (HTTP 529)"
+
     if status_code >= 500:
-        # 5xx 通常是服务端临时故障
         return ErrorCode.LLM_TIMEOUT, f"服务端故障 (HTTP {status_code})，可重试"
 
     # 按提供商特定模式匹配
