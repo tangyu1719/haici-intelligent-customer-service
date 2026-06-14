@@ -128,7 +128,7 @@ class BaseAdapter(ABC):
                 return LLMResponse(
                     content="",
                     provider=self.provider,
-                    error=f"HTTP {resp.status_code}: {resp.text[:500]}",
+                    error=f"HTTP {resp.status_code}: {(resp.text or '')[:500]}",
                     latency_ms=latency,
                 )
 
@@ -212,6 +212,16 @@ class BaseAdapter(ABC):
             url = self._chat_url()
             resp = self._session.post(url, json=body, timeout=15)
             latency = (time.perf_counter() - t0) * 1000
+            if not resp.ok:
+                err_text = (resp.text or "").strip()
+                return {
+                    "provider": self.provider,
+                    "model": self.config.model,
+                    "ok": False,
+                    "status_code": resp.status_code,
+                    "error": f"HTTP {resp.status_code}: {err_text[:300]}" if err_text else f"HTTP {resp.status_code}",
+                    "latency_ms": round(latency, 1),
+                }
             return {
                 "provider": self.provider,
                 "model": self.config.model,

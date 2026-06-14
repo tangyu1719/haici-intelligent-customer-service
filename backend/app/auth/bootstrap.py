@@ -12,8 +12,7 @@ from app.auth.seed import (
     ensure_roles,
     seed_menus,
     sync_agent_settings_menu,
-    sync_knowledge_multimodal_menu,
-    sync_structured_processing_menu,
+    sync_knowledge_menu_group,
     sync_profile_menu_group,
     sync_feedback_menu,
     sync_log_menu_group,
@@ -137,10 +136,9 @@ def ensure_auth_ready() -> None:
         seed_menus(db)
         sync_log_menu_group(db)
         sync_feedback_menu(db)
-        sync_knowledge_multimodal_menu(db)
+        sync_knowledge_menu_group(db)
         sync_profile_menu_group(db)
         sync_agent_settings_menu(db)
-        sync_structured_processing_menu(db)
         backfill_user_no(db)
         ensure_bootstrap_admin(db)
         ensure_admin_user(db)

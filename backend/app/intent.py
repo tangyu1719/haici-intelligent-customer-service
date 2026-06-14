@@ -17,8 +17,9 @@ class IntentType(Enum):
 
 
 FAQ_ANSWERS = {
-    "你好": "您好，我是智能客服助手，请问有什么可以帮您？",
-    "您好": "您好，我是智能客服助手，请问有什么可以帮您？",
+    "你好": "您好，我是 HaiCi 智能客服助手，请问有什么可以帮您？",
+    "您好": "您好，我是 HaiCi 智能客服助手，请问有什么可以帮您？",
+    "你是谁": "我是 HaiCi 智能客服助手，可以帮您解答产品咨询、售后政策等问题。",
     "谢谢": "不客气，还有其他问题随时问我。",
     "再见": "再见，祝您生活愉快！",
 }
@@ -40,9 +41,14 @@ class IntentResult:
 class IntentRecognizer:
     def _rule_classify(self, query: str) -> Optional[IntentResult]:
         text = query.strip()
+        norm = re.sub(r"[？?！!。.\s]+", "", text)
         lower = text.lower()
-        if text in FAQ_ANSWERS:
-            return IntentResult(intent=IntentType.CHITCHAT, confidence=0.99, faq_answer=FAQ_ANSWERS[text])
+        if text in FAQ_ANSWERS or norm in FAQ_ANSWERS:
+            ans = FAQ_ANSWERS.get(text) or FAQ_ANSWERS.get(norm, "")
+            return IntentResult(intent=IntentType.CHITCHAT, confidence=0.99, faq_answer=ans)
+        for key, ans in FAQ_ANSWERS.items():
+            if key in text or key in norm:
+                return IntentResult(intent=IntentType.CHITCHAT, confidence=0.95, faq_answer=ans)
         if any(k in text for k in COMPLAINT_KEYWORDS):
             return IntentResult(intent=IntentType.COMPLAINT, confidence=0.9)
         if any(k in text for k in AFTER_SALE_KEYWORDS):

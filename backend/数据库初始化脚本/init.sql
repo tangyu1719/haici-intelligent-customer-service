@@ -11,10 +11,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    context_id VARCHAR(36) NOT NULL COMMENT '上下文UUID',
     user_id BIGINT NOT NULL,
     title VARCHAR(200) NOT NULL DEFAULT '新对话',
+    meta_json JSON NULL COMMENT '扩展元数据：message_count/last_intent/note/pinned',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '1正常0归档',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_sessions_context (context_id),
     INDEX idx_sessions_user (user_id),
     CONSTRAINT fk_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

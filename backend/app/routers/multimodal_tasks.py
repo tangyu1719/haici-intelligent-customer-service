@@ -7,28 +7,41 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import shutil
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.database import get_db
 from app.deps import get_current_user
+from app.models import KnowledgeBase, KnowledgeDocument, User
+from app.services.multimodal_pipeline import run_ingest_in_background
 from app.services.multimodal_task_manager import (
-    add_log,
-    complete_stage,
     create_task,
     delete_task,
-    fail_stage,
     get_task,
     list_tasks,
-    start_stage,
-    update_task,
     load_from_disk,
+    update_task,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/multimodal-tasks", tags=["多模态任务"])
+
+ALLOWED_SUFFIXES = {
+    ".txt", ".md", ".markdown", ".pdf",
+    ".doc", ".docx", ".csv",
+    ".xls", ".xlsx", ".ppt", ".pptx",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff",
+}
 
 
 class TaskListItem(BaseModel):
@@ -48,6 +61,87 @@ class TaskListItem(BaseModel):
 
 # 启动时恢复任务
 load_from_disk()
+
+
+@router.post("/upload")
+async def upload_and_process(
+    file: UploadFile = File(...),
+    slice_method: str = Form(default="auto"),
+    kb_id: int | None = Form(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """上传文档并立即返回 task_id；MD 标准化在后台执行，前端可轮询/SSE 跟踪日志。"""
+    settings.ensure_dirs()
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+    from app.services.filename_utils import normalize_upload_filename
+
+    safe_filename = normalize_upload_filename(file.filename)
+    suffix = Path(safe_filename).suffix.lower()
+    if suffix not in ALLOWED_SUFFIXES:
+        raise HTTPException(status_code=400, detail="不支持的文件格式")
+
+    if kb_id is not None:
+        kb = db.get(KnowledgeBase, kb_id)
+        if not kb or kb.user_id != current_user.id:
+            raise HTTPException(status_code=400, detail="知识库不存在")
+    else:
+        default_kb = (
+            db.query(KnowledgeBase)
+            .filter(KnowledgeBase.user_id == current_user.id, KnowledgeBase.is_default == 1)
+            .first()
+        )
+        if default_kb:
+            kb_id = default_kb.id
+
+    mode = (slice_method or settings.KB_DEFAULT_SLICE_METHOD).strip() or "auto"
+    path = Path(settings.UPLOAD_DIR) / f"{uuid.uuid4().hex}{suffix}"
+    with path.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    doc = KnowledgeDocument(
+        user_id=current_user.id,
+        kb_id=kb_id,
+        filename=safe_filename,
+        storage_path=str(path),
+        status="processing",
+    )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    task = create_task(
+        filename=doc.filename,
+        file_path=str(path),
+        document_id=doc.id,
+        tenant_id=current_user.id,
+    )
+    task_id = task["task_id"]
+    update_task(task_id, status="running", stage="upload", stage_label="文件已接收，排队处理")
+
+    run_ingest_in_background(
+        task_id=task_id,
+        file_path=path,
+        document_id=doc.id,
+        document_name=doc.filename,
+        tenant_id=current_user.id,
+        slice_method=mode,
+    )
+
+    logger.info(
+        "[多模态文档-MD改造|multimodal_tasks.upload_and_process|doc_id=%s|硬编执行|已入队] task_id=%s; file=%s",
+        doc.id,
+        task_id,
+        doc.filename,
+    )
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "document_id": doc.id,
+        "filename": doc.filename,
+        "status": "running",
+    }
 
 
 @router.get("")
@@ -115,8 +209,8 @@ def get_task_detail(task_id: str, _user=Depends(get_current_user)) -> dict[str, 
 
 
 @router.get("/{task_id}/logs")
-async def stream_task_logs(task_id: str, _user=Depends(get_current_user)):
-    """SSE 流式推送任务日志和进度"""
+async def stream_task_logs(task_id: str):
+    """SSE 流式推送任务日志和进度（鉴权走中间件 ?token= 或 Bearer）。"""
     t = get_task(task_id)
     if not t:
         raise HTTPException(status_code=404, detail="任务不存在")

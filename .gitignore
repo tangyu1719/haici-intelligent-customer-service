@@ -12,5 +12,6 @@ frontend/dist/
 .tools/
 .DS_Store
 *.log
+.run/
 .idea/
 .vscode/

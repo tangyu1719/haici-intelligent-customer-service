@@ -44,14 +44,19 @@ def read_document_text(file_path: Path, *, normalized_md: Path | None = None) ->
     raise ValueError(f"不支持的文件格式: {suffix}")
 
 
-def save_parsed_exports(file_path: Path, text: str) -> dict[str, str]:
+def save_parsed_exports(
+    file_path: Path,
+    text: str,
+    *,
+    document_name: str = "",
+) -> dict[str, str]:
     """将解析结果落盘为 MD / TXT（多模态最终文档形态）。"""
     from app.services.haici_output import mm_export_dir
 
     if not text.strip():
         return {}
     export_root = mm_export_dir()
-    stem = file_path.stem
+    stem = Path(document_name).stem if document_name else file_path.stem
     safe = "".join(c for c in stem if c.isalnum() or c in "._- ()[]")[:120] or "document"
     md_path = (export_root / f"{safe}.md").resolve()
     txt_path = (export_root / f"{safe}.txt").resolve()
@@ -104,14 +109,20 @@ def ingest_uploaded_document(
     from app.services.doc_inspector import inspect_document
     from app.services.doc_normalizer import normalize_document
     from app.services.multimodal_task_manager import (
-        start_stage, complete_stage, fail_stage, update_task,
+        complete_stage,
+        fail_stage,
+        get_task,
+        start_stage,
+        update_task,
     )
 
-    def _step(stage_id: str):
-        if task_id: start_stage(task_id, stage_id)
+    def _step(stage_id: str) -> None:
+        if task_id:
+            start_stage(task_id, stage_id)
 
-    def _done(stage_id: str, result: any = None):
-        if task_id: complete_stage(task_id, stage_id, result)
+    def _done(stage_id: str, result: object = None) -> None:
+        if task_id:
+            complete_stage(task_id, stage_id, result)
 
     try:
         _step("inspect")
@@ -122,9 +133,16 @@ def ingest_uploaded_document(
 
         if settings.KB_NORMALIZE_ENABLED and inspect.get("requires_normalization"):
             _step("normalize")
-            norm = normalize_document(file_path, tenant_id=tenant_id, doc_id=document_id)
+            norm = normalize_document(
+                file_path,
+                tenant_id=tenant_id,
+                doc_id=document_id,
+                document_name=document_name,
+                task_id=task_id,
+            )
             if not norm.ok:
-                if task_id: fail_stage(task_id, "normalize", norm.error or "标准化失败")
+                if task_id:
+                    fail_stage(task_id, "normalize", norm.error or "标准化失败")
                 raise ValueError(norm.error or "文档标准化失败")
             norm_md = Path(norm.normalized_md_path)
             manifest = norm.manifest
@@ -132,21 +150,25 @@ def ingest_uploaded_document(
             text = norm.text
             _done("normalize", {"manifest": manifest})
             if task_id:
-                update_task(task_id, output_dir=str(norm_md.parent) if norm_md else "",
-                           output_md=str(norm_md) if norm_md else "",
-                           output_manifest=str(Path(str(norm_md.parent)) / "manifest.json") if norm_md else "")
+                update_task(
+                    task_id,
+                    output_dir=str(norm_md.parent) if norm_md else "",
+                    output_md=str(norm_md) if norm_md else "",
+                    output_manifest=str(Path(str(norm_md.parent)) / "manifest.json") if norm_md else "",
+                )
         else:
             _step("normalize")
             text = read_document_text(file_path)
             _done("normalize", {"text_length": len(text)})
 
         _step("chunk")
-        save_parsed_exports(file_path, text)
+        save_parsed_exports(file_path, text, document_name=document_name)
         chunks = split_to_documents(text, document_id, document_name, slice_method=slice_method)
         _done("chunk", {"chunk_count": len(chunks)})
 
         _step("vectorize")
         from app.vectorstore import add_documents
+
         count = add_documents(chunks, tenant_id=str(tenant_id))
         _done("vectorize", {"vector_count": count})
 
@@ -162,8 +184,9 @@ def ingest_uploaded_document(
         }
     except Exception as e:
         if task_id:
-            # 找到当前进行中的阶段并标记失败
-            for sid in ["inspect", "normalize", "chunk", "vectorize"]:
-                stage = getattr(None, sid, None)  # noop, just flow
-            fail_stage(task_id, "normalize", str(e)[:300])
+            t = get_task(task_id) or {}
+            fail_sid = t.get("stage") or "normalize"
+            if fail_sid not in {"inspect", "normalize", "chunk", "vectorize"}:
+                fail_sid = "normalize"
+            fail_stage(task_id, fail_sid, str(e)[:300])
         raise

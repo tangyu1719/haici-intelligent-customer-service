@@ -1,13 +1,10 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, loadAuthFromStorage } from '../api/auth'
 import type { ChatSessionItem, KnowledgeBaseBrief, KnowledgeDoc, LlmGatewaySnapshot } from '../types'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
 import GatewayPanel from '../components/GatewayPanel.vue'
-import GatewaySecurityPanel from '../components/GatewaySecurityPanel.vue'
-import GatewayCachePanel from '../components/GatewayCachePanel.vue'
-import GatewayCircuitPanel from '../components/GatewayCircuitPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
 import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
@@ -17,6 +14,7 @@ import MultimodalPanel from '../components/MultimodalPanel.vue'
 import StructuredPanel from '../components/StructuredPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
+import { fixDisplayFilename } from '../utils/filename'
 
 interface MenuNode {
   id: number
@@ -81,12 +79,7 @@ const syncExpandedMenus = (): void => {
   const next = new Set<number>()
   const walk = (nodes: MenuNode[]) => {
     for (const n of nodes) {
-      // 自动展开包含当前路由的父菜单
-      if (n.children?.some((c) => c.path === activePath.value || c.children?.some((gc: MenuNode) => gc.path === activePath.value))) {
-        next.add(n.id)
-      }
-      // 默认展开所有含子菜单的目录（知识库 / Agent设置 等），避免二级菜单被折叠隐藏
-      if (n.menu_type === 'M' && (n.children?.length ?? 0) > 0) {
+      if (n.children?.some((c) => c.path === activePath.value)) {
         next.add(n.id)
       }
       if (n.children?.length) walk(n.children)
@@ -122,9 +115,6 @@ const pageTitle = computed(() => {
     '/admin/eval': 'EVAL 评测',
     '/admin/agent-config': 'Agent 配置',
     '/admin/agent-gateway': 'Agent 网关',
-    '/admin/gateway-security': '安全合规',
-    '/admin/gateway-cache': '缓存管理',
-    '/admin/gateway-circuit': '熔断监控',
     '/admin/feedback': '用户反馈',
   }
   return map[route.path] || 'HaiCi 智能客服'
@@ -146,7 +136,7 @@ const loadMenus = async (): Promise<void> => {
   if (res.ok) {
     const data = await res.json()
     menus.value = data.items || []
-    setTimeout(() => syncExpandedMenus(), 100)
+    syncExpandedMenus()
   }
 }
 
@@ -544,34 +534,15 @@ onMounted(async () => {
               v-if="isSidebarOpen && expandedMenuIds.has(node.id)"
               class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
             >
-              <template v-for="child in node.children" :key="child.id">
-                <!-- 子目录（三级菜单父节点） -->
-                <div v-if="child.menu_type === 'M' && child.children?.length" class="flex flex-col gap-0.5">
-                  <button
-                    class="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all hover:bg-[#363e42]/5"
-                    :class="isChildMenuActive(child) ? 'text-[#d97706]' : 'text-[#64748b]'"
-                    @click="toggleMenuGroup(child.id)"
-                  >
-                    <span>{{ child.name }}</span>
-                    <i class="fas text-[9px]" :class="expandedMenuIds.has(child.id) ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
-                  </button>
-                  <div v-if="expandedMenuIds.has(child.id)" class="ml-2 pl-2 border-l border-[#363e42]/8 flex flex-col gap-0.5">
-                    <router-link
-                      v-for="gc in child.children.filter((c:MenuNode) => c.menu_type === 'C' && c.path)"
-                      :key="gc.id" :to="gc.path || '/'"
-                      class="w-full flex items-center py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all"
-                      :class="activePath === gc.path ? 'bg-[#363e42] text-white' : 'text-[#64748b] hover:bg-[#363e42]/5'"
-                    >{{ gc.name }}</router-link>
-                  </div>
-                </div>
-                <!-- 叶子节点 -->
-                <router-link
-                  v-else-if="child.menu_type === 'C' && child.path"
-                  :to="child.path || '/'"
-                  class="w-full flex items-center py-1.5 px-2 rounded-lg text-[11px] font-bold transition-all"
-                  :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
-                >{{ child.name }}</router-link>
-              </template>
+              <router-link
+                v-for="child in node.children.filter((c) => c.menu_type === 'C' && c.path)"
+                :key="child.id"
+                :to="child.path || '/'"
+                class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
+                :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
+              >
+                {{ child.name }}
+              </router-link>
             </div>
           </div>
           <router-link
@@ -608,7 +579,7 @@ onMounted(async () => {
       <MultimodalPanel v-else-if="route.path === '/multimodal'" />
       <StructuredPanel v-else-if="route.path === '/structured'" />
 
-      <div v-else-if="route.path === '/knowledge'" class="flex-1 p-6 overflow-y-auto">
+                  <div v-else-if="route.path === '/knowledge'" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-5xl mx-auto">
           <div class="flex flex-wrap justify-between items-center gap-3 mb-6">
             <h2 class="text-lg font-black">知识库管理</h2>
@@ -624,14 +595,14 @@ onMounted(async () => {
               <button
                 v-if="!kbCreating"
                 type="button"
-                class="text-[11px] font-bold text-[#d97706] border border-[#d97706]/30 rounded-lg px-3 py-1.5"
+                class="text-[11px] font-bold text-[#d97706] border border-[#d97706]/30 rounded-lg px-3 py-1.5 hover:bg-[#d97706]/5 transition-colors"
                 @click="kbCreating = true"
               >+ 新建知识库</button>
               <template v-if="kbCreating">
-                <input v-model="kbCreateName" type="text" class="border rounded-lg px-2 py-1.5 text-[12px] w-[140px]" placeholder="知识库名称" maxlength="128" />
-                <input v-model="kbCreateDesc" type="text" class="border rounded-lg px-2 py-1.5 text-[12px] w-[160px]" placeholder="描述（可选）" maxlength="512" />
-                <button type="button" class="text-[11px] font-bold bg-[#363e42] text-white rounded-lg px-3 py-1.5" @click="createKb">确定</button>
-                <button type="button" class="text-[11px] text-[#363e42]/50" @click="kbCreating = false">取消</button>
+                <input v-model="kbCreateName" type="text" class="border rounded-lg px-2 py-1.5 text-[12px] w-[140px] focus:outline-none focus:border-[#d97706]" placeholder="知识库名称" maxlength="128" />
+                <input v-model="kbCreateDesc" type="text" class="border rounded-lg px-2 py-1.5 text-[12px] w-[160px] focus:outline-none focus:border-[#d97706]" placeholder="描述（可选）" maxlength="512" />
+                <button type="button" class="text-[11px] font-bold bg-[#363e42] text-white rounded-lg px-3 py-1.5 hover:bg-[#4a5256] transition-colors" @click="createKb">确定</button>
+                <button type="button" class="text-[11px] text-[#363e42]/50 hover:text-[#363e42]/70" @click="kbCreating = false">取消</button>
               </template>
               <label class="text-[12px] font-bold text-[#363e42]/60 flex items-center gap-2">
                 分块策略
@@ -639,12 +610,71 @@ onMounted(async () => {
                   <option v-for="m in kbSliceMethods" :key="m.id" :value="m.id">{{ m.label }}</option>
                 </select>
               </label>
-              <label v-if="hasPerm('kb:upload')" class="bg-[#363e42] text-white px-5 py-2.5 rounded-xl font-bold text-[13px] cursor-pointer">
+              <label v-if="hasPerm('kb:upload')" class="bg-[#363e42] text-white px-5 py-2.5 rounded-xl font-bold text-[13px] cursor-pointer hover:bg-[#4a5256] transition-colors shadow-sm">
                 上传文档
                 <input type="file" class="hidden" accept=".txt,.md,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" @change="uploadKnowledge" />
               </label>
             </div>
           </div>
+
+          <!-- 知识库卡片 -->
+          <div v-if="kbList.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+            <div
+              v-for="kb in kbList"
+              :key="kb.id"
+              :class="[
+                'relative rounded-2xl border-2 p-5 cursor-pointer transition-all duration-200 hover:shadow-lg',
+                selectedKbId === kb.id
+                  ? 'border-[#d97706] bg-[#d97706]/5 shadow-md'
+                  : 'border-[#e5e7eb] bg-white hover:border-[#d97706]/40'
+              ]"
+              @click="selectedKbId = kb.id; kbQuery.page = 1; loadKnowledge()"
+            >
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex items-center gap-2.5">
+                  <div :class="[
+                    'w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black',
+                    selectedKbId === kb.id ? 'bg-[#d97706] text-white' : 'bg-[#f3f4f6] text-[#363e42]'
+                  ]">
+                    {{ kb.name.charAt(0).toUpperCase() }}
+                  </div>
+                  <div>
+                    <div class="text-sm font-bold text-[#363e42] leading-tight">{{ kb.name }}</div>
+                    <div v-if="kb.description" class="text-[11px] text-[#64748b] mt-0.5 line-clamp-2">{{ kb.description }}</div>
+                  </div>
+                </div>
+                <span v-if="kb.is_default === 1" class="text-[10px] font-bold bg-[#fef3c7] text-[#d97706] px-2 py-0.5 rounded-full">默认</span>
+              </div>
+              <div class="flex items-center gap-4 text-[11px] text-[#64748b]">
+                <span class="flex items-center gap-1">
+                  <span class="text-[#d97706]">文档</span> {{ kb.doc_count }} 篇
+                </span>
+                <span class="flex items-center gap-1">
+                  <span class="text-[#d97706]">创建</span> {{ fmtDateTime(kb.created_at) }}
+                </span>
+              </div>
+              <div v-if="selectedKbId === kb.id" class="absolute top-3 right-3 w-5 h-5 bg-[#d97706] rounded-full flex items-center justify-center">
+                <span class="text-white text-[10px] font-black">✓</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-if="kbList.length === 0 && !kbCreating" class="text-center py-16 mb-6 bg-white rounded-2xl border-2 border-dashed border-[#e5e7eb]">
+            <div class="text-5xl mb-4">📚</div>
+            <h3 class="text-base font-bold text-[#363e42] mb-2">还没有知识库</h3>
+            <p class="text-sm text-[#64748b] mb-5 max-w-md mx-auto leading-relaxed">
+              创建知识库后，可上传 PDF、Word、Excel 等文档，系统会自动 OCR/VLM 识别并写入向量库，供 AI 问答检索。
+            </p>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 bg-[#d97706] text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-[#c26806] transition-colors shadow-sm"
+              @click="kbCreating = true"
+            >
+              <span class="text-lg">+</span> 创建第一个知识库
+            </button>
+          </div>
+
           <p class="text-[11px] text-[#363e42]/50 mb-4">
             含图文档（PDF/DOCX/XLS 等）会先标准化：抽图 → OCR/VLM 识别 → 写入 kb_assets；单文档 VLM 上限
             <strong>{{ kbVlmLimit }}</strong> 张。图片经 <code>/output/kb_assets/...</code> 可在回答界面渲染。
@@ -687,7 +717,7 @@ onMounted(async () => {
             </thead>
             <tbody>
               <tr v-for="d in kbDocs" :key="d.id" class="border-t">
-                <td class="p-3">{{ d.filename }}</td>
+                <td class="p-3">{{ fixDisplayFilename(d.filename) }}</td>
                 <td class="p-3 text-[11px] text-[#64748b]">{{ d.kb_name || '未分类' }}</td>
                 <td class="p-3 uppercase text-[11px]">{{ d.file_type || '-' }}</td>
                 <td class="p-3 text-[11px]">{{ d.file_size_human || (d.file_size_bytes ? `${d.file_size_bytes} B` : '-') }}</td>
@@ -705,7 +735,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-else-if="route.path === '/sessions'" class="flex-1 p-6 overflow-y-auto">
+<div v-else-if="route.path === '/sessions'" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-4">
           <div class="lg:col-span-3 bg-white rounded-2xl border overflow-hidden">
             <ListQueryBar
@@ -816,9 +846,6 @@ onMounted(async () => {
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
-      <GatewaySecurityPanel v-else-if="route.path === '/admin/gateway-security'" class="flex-1 overflow-y-auto" />
-      <GatewayCachePanel v-else-if="route.path === '/admin/gateway-cache'" class="flex-1 overflow-y-auto" />
-      <GatewayCircuitPanel v-else-if="route.path === '/admin/gateway-circuit'" class="flex-1 overflow-y-auto" />
 
       <div v-else-if="route.path.startsWith('/admin/logs/')" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-6xl mx-auto bg-white rounded-2xl border overflow-hidden">

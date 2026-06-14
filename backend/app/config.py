@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     VLM_IMAGE_ENABLED: bool = os.getenv("VLM_IMAGE_ENABLED", "true").lower() in ("1", "true", "yes")
     MAX_IMAGES_PER_DOC: int = int(os.getenv("MAX_IMAGES_PER_DOC", "30"))
     KB_NORMALIZE_ENABLED: bool = os.getenv("KB_NORMALIZE_ENABLED", "true").lower() in ("1", "true", "yes")
+    # 图片 OCR/VLM 并行（API 调用为主，适度并发可显著缩短标准化耗时）
+    IMAGE_PROCESS_PARALLEL: bool = os.getenv("IMAGE_PROCESS_PARALLEL", "true").lower() in ("1", "true", "yes")
+    IMAGE_PROCESS_WORKERS: int = int(os.getenv("IMAGE_PROCESS_WORKERS", "4"))
+    # 默认关闭类型分类 VLM，每张图少一次网关调用（UI 手册场景收益大）
+    IMAGE_CLASSIFY_ENABLED: bool = os.getenv("IMAGE_CLASSIFY_ENABLED", "false").lower() in ("1", "true", "yes")
 
     # ── 大规模上下文防稀释 (PRD 加分项5) ──
     ANTI_DILUTION_ENABLED: bool = os.getenv("ANTI_DILUTION_ENABLED", "true").lower() in ("1", "true", "yes")

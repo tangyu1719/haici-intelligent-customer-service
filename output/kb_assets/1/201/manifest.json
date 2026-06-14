@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "source": "F:\\java\\AIOPS\\SuperBizAgent-release-2026-01-02\\demo_wendanghua\\SuperBizAgent-AgentFramework\\HaiChiAgent\\backend\\.pytest_tmp\\test_normalize_pdf_via_mineru_0\\manual.pdf",
+  "inspect": {
+    "file_type": "pdf",
+    "file_size_bytes": 13,
+    "file_size_human": "13 B",
+    "estimated_image_count": 0,
+    "markdown_image_refs": 0,
+    "requires_normalization": true,
+    "vlm_limit": 30,
+    "processed_image_count": 2,
+    "truncated": false
+  },
+  "pipeline_note": "mineru_pdf",
+  "truncated": false,
+  "vlm_limit": 30,
+  "image_count": 2,
+  "images": [
+    {
+      "image_id": "img_0001",
+      "source_format": "pdf",
+      "ordinal_in_doc": 1,
+      "file_name": "img_0001.png",
+      "public_url": "/output/kb_assets/1/201/images/img_0001.png",
+      "placeholder": "<!-- IMG:img_0001 -->",
+      "image_type": "unknown",
+      "vlm_type_confidence": 0.0,
+      "ocr_text": "",
+      "vlm_description": "",
+      "pipeline": "ocr_only",
+      "degraded": true,
+      "flowchart_report": null,
+      "overlay_url": null
+    },
+    {
+      "image_id": "img_0002",
+      "source_format": "pdf",
+      "ordinal_in_doc": 2,
+      "file_name": "img_0002.png",
+      "public_url": "/output/kb_assets/1/201/images/img_0002.png",
+      "placeholder": "<!-- IMG:img_0002 -->",
+      "image_type": "unknown",
+      "vlm_type_confidence": 0.0,
+      "ocr_text": "",
+      "vlm_description": "",
+      "pipeline": "ocr_only",
+      "degraded": true,
+      "flowchart_report": null,
+      "overlay_url": null
+    }
+  ]
+}

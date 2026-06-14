@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "source": "F:\\java\\AIOPS\\SuperBizAgent-release-2026-01-02\\demo_wendanghua\\SuperBizAgent-AgentFramework\\HaiChiAgent\\backend\\.pytest_tmp\\test_manifest_public_url_fetch0\\with_img.docx",
+  "inspect": {
+    "file_type": "docx",
+    "file_size_bytes": 2552,
+    "file_size_human": "2.5 KB",
+    "estimated_image_count": 1,
+    "markdown_image_refs": 0,
+    "requires_normalization": true,
+    "vlm_limit": 30,
+    "processed_image_count": 1,
+    "truncated": false
+  },
+  "pipeline_note": "docx_p0_ordered",
+  "truncated": false,
+  "vlm_limit": 30,
+  "image_count": 1,
+  "images": [
+    {
+      "image_id": "img_0001",
+      "source_format": "docx",
+      "ordinal_in_doc": 1,
+      "file_name": "img_0001.png",
+      "public_url": "/output/kb_assets/1/107/images/img_0001.png",
+      "placeholder": "<!-- IMG:img_0001 -->",
+      "image_type": "unknown",
+      "vlm_type_confidence": 0.0,
+      "ocr_text": "",
+      "vlm_description": "",
+      "pipeline": "ocr_only",
+      "degraded": true,
+      "flowchart_report": null,
+      "overlay_url": null
+    }
+  ]
+}

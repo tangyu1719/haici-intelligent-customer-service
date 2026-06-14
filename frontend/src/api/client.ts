@@ -1,21 +1,33 @@
-export const TOKEN_KEY = 'haici_token'
+export {
+  authHeaders,
+  clearAuth,
+  currentUser,
+  getAccessToken,
+  getRefreshToken,
+  hasPerm,
+  loadAuthFromStorage,
+  refreshAccessToken,
+  setAuth,
+} from './auth'
 
 export function getToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || ''
+  return localStorage.getItem('hc_access_token') || ''
 }
 
 export function setToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token)
-}
-
-export function authHeaders(): Record<string, string> {
-  return {
-    Authorization: `Bearer ${getToken()}`,
-    'Content-Type': 'application/json',
-  }
+  localStorage.setItem('hc_access_token', token)
 }
 
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const headers = { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) }
-  return fetch(path, { ...init, headers })
+  const { authHeaders, getRefreshToken, refreshAccessToken, clearAuth } = await import('./auth')
+  let res = await fetch(path, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) } })
+  if (res.status === 401 && getRefreshToken()) {
+    const ok = await refreshAccessToken()
+    if (ok) {
+      res = await fetch(path, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) } })
+    } else {
+      clearAuth()
+    }
+  }
+  return res
 }

@@ -1,0 +1,78 @@
+库存调整单提交
+invChangeHeadComponent.submit(InvChangeHeadDto condition)
+1.参数校验：BY前端传入的单头id集合关联盘点单重新查询单头数据；
+ 1.1 IF数据集合为空，则抛错61K97=调整单列表为空!
+ 1.2 循环返回集合数据｛IF单据状态不为10-初始，抛错
+=单号%s
+不为草稿状态,不允许操作! ；｝
+ 1.3 BY单头的单据号集合查询单身数据集合；
+  1.3.1 单身数据为空，抛错60J13=单身明细为空，无法进行数据库操
+作! ；当单身数据量 大于 2000时，抛错60N22=当前操作数据量超
+过%s，请分批操作！
+ 1.4 循环单头数据｛判断单头的仓库状态是否为有效；仓库状态为盘点
+时，抛错61K70=库存服务执行异常:全仓库盘点,禁止操作!；每个盘点单
+都要有单身数据，否则抛错60J13=单身明细为空，无法进行数据库操
+作!｝
+61J41
+2.循环单头数据｛
+  2.1 #调用提交处理接口
+  2.2 记录失败原因 并 拼接
+｝
+3.拼接的失败原因不为空时，抛出；
+#调用提交处理接口
+submitInvChange(InvChangeHeadDto condition)
+1.更新单头状态为30-已完成；
+2.将单头数据按照组织、仓库进行分组，循环单头分组数据｛
+ 2.1 将相同组织、仓库的单身数据合并在一起；并按照物料、储位、
+wmsLotNo批次进行分组，循环单身分组数据｛
+  2.1.1 将单身的数量qty、参考数量referenceQty进行累加；
+  2.1.2 重新组装库存异动数据；主体数据以单身数据为主；交易类型=40-调
+整；invChangeType为1-入库，单身数据加入入库集合；invChangeType为2-
+出库，单身数据加入出库集合；｝｝
+3.#库存异动+插入回执单
+#调用提交处理接口
+#库存异动+插入回执单
+multiProcessInsertExtDocRetList(ExtBcDocConfigDto, String outsideUserNo,
+List<InvChangeHeadDto> invChangeHeadList
+, List<InvInventoryDto> inAllList, List<InvInventoryDto> outAllList)
+1.数据准备：BY组织、单别查询单别配置；为空时抛错61K87=源单类别%s未在任务执行配置中设置,请至任
+务执行配置核实!；调整单数量的抛转类型=系统参数ADJUSTMENT_DOC_QUANTITY_TRANSFER_TYPE的设置
+值(1-调整后库存量抛转，2-调整差异量抛转);关账日期=BY组织获取关账日期；
+2.将异动数据进行分流多线程处理，线程间互不影响｛
+ 2.1 #增加库存
+ 2.2 #扣减库存
+ 2.3 #插入回执单数据
+ 2.4 线程成功，则事务提交；线程失败则事务回滚；
+｝
+3.所有线程都成功了，继续；有一个失败了抛错；
+4.增加库存中的新增记录统一在最后插入，避免多线程主键冲突问题；
+5.IF单别配置的回传否isReturn为1-是时，IF单别配置是实时回传，则将数据回传ERP，并 根据回传结果
+更新回执单数据的状态；
+#库存异动+插入回执单
+#增加库存
+batchCreateInventoryForInvChange(List<InvInventoryDto> list,List<InvStockDto> invStockDtoList)
+1.校验储位是否允许混料、混批；
+2.IF系统参数IS_USE_ONE_STORE（是否一套账）为Y 且 当前仓库的栏位oneAccount（是否启用一套账）为1-是，则直接返回；
+3.查询当前库存增加数据是否已存在库存表，不存在时记录需要增加的库存数据（先记录，最后在统一增加），存在库存记录时更
+新累加数量；
+4.插入库存异动事务数据；
+#增加库存
+#扣减库存
+batchSubInventoryForInvChange(List<InvInventoryDto> list, BmWarehouseDto bmWarehouseResDto)
+1.校验储位是否允许混料、混批；
+2.IF系统参数IS_USE_ONE_STORE（是否一套账）为Y 且 当前仓库的栏位oneAccount（是否启用一套账）为1-是，则直接返回；
+3.查询当前库存扣减数据是否已存在库存表，不存在时插入一条负库存数据，存在库存记录时更新扣减数量；
+4.插入库存异动事务数据；
+#扣减库存
+#插入回执单数据
+insertExtDocRetByInvInventoryList(ExtBcDocConfigDto docConfigResDto, String outsideUserNo,
+InvChangeHeadDto invChangeHead, Date postedDate, BmWarehouseDto bmWarehouseResDto, String value,
+List<String> timeList, List<ExtDocRetTempDto> docRetAllList)
+1.数据准备：循环调整单的单身数据｛组装回执单数据：
+ 1.1 赋值单别配置的集团、单别数据；入库时赋值inWarehouseNo\inCellNo等相关入库数据；出库时赋值
+outWarehouseNo\outCellNo等相关出库数据；调整单抛转类型为1-调整后库存量抛转时，BY仓库、储位、物料、组织、批次查
+询库存表信息，取库存量赋值到回执单数量applyQty;调整单抛转类型为2-调整差异量抛转时，取单身qty赋值
+applyQty;processMode=23等；
+｝
+2.批量插入回执单数据；
+#插入回执单数据

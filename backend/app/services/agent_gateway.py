@@ -251,29 +251,62 @@ def choose_node(
     return sorted(active_nodes, key=lambda n: n.priority)[0]
 
 
+def resolve_gateway_invoke_model(
+    provider: str,
+    model: str,
+    endpoint_id: str = "",
+) -> str:
+    """ARK 调用时 model 参数应为 Endpoint ID（ep-xxx），非展示名。"""
+    prov = (provider or "").strip().lower()
+    ep = (endpoint_id or "").strip()
+    m = (model or "").strip()
+    if prov == "ark" and ep:
+        return ep
+    return m
+
+
 def test_connection(
     provider: str,
     api_key: str,
     base_url: str,
     model: str,
+    endpoint_id: str = "",
 ) -> dict[str, Any]:
     """测试 LLM 连接"""
     from app.adapters.registry import get_adapter
+
+    invoke_model = resolve_gateway_invoke_model(provider, model, endpoint_id)
+    if not (api_key or "").strip():
+        return {
+            "provider": provider,
+            "model": invoke_model,
+            "ok": False,
+            "error": "缺少 API Key",
+        }
+    if not invoke_model:
+        return {
+            "provider": provider,
+            "model": invoke_model,
+            "ok": False,
+            "error": "缺少 model / Endpoint ID",
+        }
 
     try:
         adapter = get_adapter(
             provider=provider,
             api_key=api_key,
             base_url=base_url,
-            model=model,
+            model=invoke_model,
             max_tokens=10,
         )
         result = adapter.health_check()
+        if invoke_model and result.get("model") != invoke_model:
+            result["model"] = invoke_model
         return result
     except Exception as exc:
         return {
             "provider": provider,
-            "model": model,
+            "model": invoke_model,
             "ok": False,
             "error": str(exc)[:300],
         }
