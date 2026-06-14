@@ -54,6 +54,7 @@ class RagEvalResult:
     llm_provider: str = ""
     llm_model: str = ""
     answer_length: int = 0
+    follow_ups: list = field(default_factory=list)
     follow_ups_count: int = 0
     total_tokens: int = 0
     time_consume_ms: int = 0
@@ -98,6 +99,7 @@ class RagEvalResult:
             "llm_provider": self.llm_provider,
             "llm_model": self.llm_model,
             "answer_length": self.answer_length,
+            "follow_ups": self.follow_ups or [],
             "follow_ups_count": self.follow_ups_count,
             "total_tokens": self.total_tokens,
             "time_consume_ms": self.time_consume_ms,
@@ -171,6 +173,7 @@ def build_rag_metrics(db: Session, *, limit: int = 50, days: int = 7) -> dict:
             llm_provider=meta.get("llm_provider", ""),
             llm_model=meta.get("llm_model", ""),
             answer_length=meta.get("answer_length", 0),
+            follow_ups=meta.get("follow_ups") or [],
             follow_ups_count=meta.get("follow_ups_count", 0),
             total_tokens=meta.get("total_tokens", 0),
             time_consume_ms=r.time_consume_ms,

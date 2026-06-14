@@ -13,7 +13,7 @@ interface RagItem {
   context_precision: number|null; context_recall: number|null
   anti_dilution: boolean; kb_id: number|null
   llm_provider: string; llm_model: string
-  answer_length: number; follow_ups_count: number; total_tokens: number
+  answer_length: number; follow_ups: string[]; follow_ups_count: number; total_tokens: number
   time_consume_ms: number; span_intent_ms: number; span_rewrite_ms: number
   span_retrieval_ms: number; span_generation_ms: number
   success: boolean; created_at: string
@@ -204,6 +204,7 @@ onMounted(refresh)
                   <th class="p-2 text-center w-[55px]">最高分</th>
                   <th class="p-2 text-center w-[55px]">P@1</th>
                   <th class="p-2 text-center w-[55px]">P@3</th>
+                  <th class="p-2 text-left w-[160px]">追问建议</th>
                   <th class="p-2 text-center w-[55px]">字数</th>
                   <th class="p-2 text-center w-[55px]">延迟ms</th>
                 </tr>
@@ -218,6 +219,10 @@ onMounted(refresh)
                   <td class="p-2 text-center font-mono font-bold" :class="item.top_score>=0.7?'text-green-600':item.top_score>=0.5?'text-amber-600':'text-red-500'">{{ item.top_score.toFixed(3) }}</td>
                   <td class="p-2 text-center">{{ item.pass_at_1?'✓':'-' }}</td>
                   <td class="p-2 text-center">{{ item.pass_at_3?'✓':'-' }}</td>
+                  <td class="p-2 text-[10px] text-[#64748b] truncate max-w-[160px]" :title="(item.follow_ups||[]).join(' | ')">
+                    <span v-if="(item.follow_ups||[]).length">{{ (item.follow_ups||[]).slice(0,2).join(' / ') }}</span>
+                    <span v-else class="text-[#94a3b8]">-</span>
+                  </td>
                   <td class="p-2 text-center font-mono">{{ item.answer_length }}</td>
                   <td class="p-2 text-center font-mono">{{ item.time_consume_ms }}</td>
                 </tr>

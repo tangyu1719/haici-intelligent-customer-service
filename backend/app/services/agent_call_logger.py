@@ -122,6 +122,7 @@ def log_rag_conversation(
     llm_model: str = "",
     llm_task_type: str = "",
     answer_length: int = 0,
+    follow_ups: list[str] | None = None,
     follow_ups_count: int = 0,
     total_tokens: int = 0,
     time_consume_ms: int = 0,
@@ -150,6 +151,7 @@ def log_rag_conversation(
                 "llm_model": llm_model,
                 "llm_task_type": llm_task_type,
                 "answer_length": answer_length,
+                "follow_ups": follow_ups or [],
                 "follow_ups_count": follow_ups_count,
                 "total_tokens": total_tokens,
             }

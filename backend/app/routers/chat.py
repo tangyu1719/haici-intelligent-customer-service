@@ -12,6 +12,7 @@ from app.database import SessionLocal, get_db
 from app.deps import get_current_user
 from app.llms import get_llm
 from app.models import ChatMessage, ChatSession, User
+from app.auth.rbac import get_user_roles
 from app.rag import build_prompt_messages, citations_from_docs, safe_retrieve_merged
 from app.schemas import ChatStreamRequest
 from app.services.agent_pipeline import run_agent_pipeline
@@ -23,7 +24,7 @@ from app.services.follow_up import generate_follow_ups
 from app.services.intent_suggest import build_intent_alternatives
 from app.services.llm_gateway import get_llm_gateway
 from app.services.term_dictionary import INTENT_LABELS
-from app.services.rate_limit import check_and_increment_daily_quota
+from app.services.rate_limit import check_and_increment_daily_quota, get_daily_quota_status
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,9 @@ def _load_history_rows(db: Session, session_id: int) -> list:
 
 
 @router.get("/config")
-def chat_config(_user: User = Depends(get_current_user)):
+def chat_config(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    roles = get_user_roles(db, user.id)
+    quota = get_daily_quota_status(db, user, roles)
     return {
         "ok": True,
         "max_question_length": settings.MAX_QUESTION_LENGTH,
@@ -89,6 +92,7 @@ def chat_config(_user: User = Depends(get_current_user)):
         "context_reserve_chars": settings.CHAT_CONTEXT_RESERVE_CHARS,
         "history_char_budget": history_char_budget(),
         "max_history_turns": settings.CHAT_HISTORY_TURNS,
+        **quota,
     }
 
 
@@ -150,7 +154,8 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
     if not session or session.user_id != current_user.id or session.status != 1:
         raise HTTPException(status_code=404, detail="会话不存在")
 
-    check_and_increment_daily_quota(db, current_user)
+    roles = get_user_roles(db, current_user.id)
+    check_and_increment_daily_quota(db, current_user, roles)
 
     user_id = int(current_user.id)
     session_id_val = int(payload.session_id)
@@ -343,6 +348,7 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 llm_model=node.model if node else "",
                 llm_task_type=task_type,
                 answer_length=len(answer),
+                follow_ups=follow_ups,
                 follow_ups_count=len(follow_ups),
                 total_tokens=len(answer) // 2,
                 time_consume_ms=int((_t_now - _t_start) * 1000),
