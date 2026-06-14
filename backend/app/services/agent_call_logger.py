@@ -102,6 +102,74 @@ def log_agent_call(
         logger.warning("[运维评测-EVAL|agent_call_logger|写入|硬编执行|失败] api_type=%s; err=%s", api_type, str(exc)[:120])
 
 
+def log_rag_conversation(
+    *,
+    trace_id: str = "",
+    user_id: int | None = None,
+    question: str = "",
+    intent: str = "",
+    intent_label: str = "",
+    rewritten_query: str = "",
+    rag_query: str = "",
+    keywords: list[str] | None = None,
+    retrieval_terms: list[str] | None = None,
+    citations_count: int = 0,
+    top_score: float = 0.0,
+    anti_dilution: bool = False,
+    kb_id: int | None = None,
+    auto_routed: bool = False,
+    llm_provider: str = "",
+    llm_model: str = "",
+    llm_task_type: str = "",
+    answer_length: int = 0,
+    follow_ups_count: int = 0,
+    total_tokens: int = 0,
+    time_consume_ms: int = 0,
+    success: bool = True,
+    error_message: str = "",
+) -> None:
+    """记录一次完整的 RAG 对话指标（异步写入，不阻塞 SSE）。"""
+    import threading
+
+    def _write() -> None:
+        try:
+            meta = {
+                "question": question[:500],
+                "intent": intent,
+                "intent_label": intent_label,
+                "rewritten_query": rewritten_query[:500],
+                "rag_query": rag_query[:500],
+                "keywords": keywords or [],
+                "retrieval_terms": retrieval_terms or [],
+                "citations_count": citations_count,
+                "top_score": round(top_score, 4),
+                "anti_dilution": anti_dilution,
+                "kb_id": kb_id,
+                "auto_routed": auto_routed,
+                "llm_provider": llm_provider,
+                "llm_model": llm_model,
+                "llm_task_type": llm_task_type,
+                "answer_length": answer_length,
+                "follow_ups_count": follow_ups_count,
+                "total_tokens": total_tokens,
+            }
+            log_agent_call(
+                api_type="rag",
+                target=f"chat/stream?session={trace_id[:8]}",
+                request_summary=question[:1000],
+                response_summary=json.dumps(meta, ensure_ascii=False),
+                status_code=200 if success else 500,
+                time_consume_ms=time_consume_ms,
+                success=success,
+                error_message=error_message[:500],
+                user_id=user_id,
+            )
+        except Exception as exc:
+            logger.warning("[RAG指标|agent_call_logger|异步写入|失败] %s", str(exc)[:120])
+
+    threading.Thread(target=_write, daemon=True).start()
+
+
 def track_agent_call(
     *,
     api_type: str,

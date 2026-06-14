@@ -156,6 +156,8 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
     session_id_val = int(payload.session_id)
 
     async def generator() -> AsyncIterator[str]:
+        import time as _time
+        _t_start = _time.time()
         stream_db = SessionLocal()
         persist_tasks: list[asyncio.Task] = []
         trace_id = set_agent_trace(user_id=user_id)
@@ -317,6 +319,34 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 assistant_message_id = await asyncio.wait_for(asyncio.shield(assistant_task), timeout=0.05)
             except asyncio.TimeoutError:
                 pass
+
+            # 异步记录RAG对话指标（不阻塞SSE）
+            from app.services.agent_call_logger import log_rag_conversation
+            _t_now = _time.time()
+            _top_score = max((float(d.metadata.get("score", 0)) for d in docs), default=0.0)
+            log_rag_conversation(
+                trace_id=trace_id,
+                user_id=user_id,
+                question=question or enriched_question,
+                intent=pipeline.intent,
+                intent_label=pipeline.intent_label,
+                rewritten_query=pipeline.rewritten_query or "",
+                rag_query=pipeline.rag_query or "",
+                keywords=pipeline.query_keywords or [],
+                retrieval_terms=pipeline.retrieval_terms or [],
+                citations_count=len(citations),
+                top_score=_top_score,
+                anti_dilution=anti_dilution_summary is not None,
+                kb_id=payload.kb_id or (int(tenant_id) if auto_routed else None),
+                auto_routed=auto_routed,
+                llm_provider=node.provider if node else "",
+                llm_model=node.model if node else "",
+                llm_task_type=task_type,
+                answer_length=len(answer),
+                follow_ups_count=len(follow_ups),
+                total_tokens=len(answer) // 2,
+                time_consume_ms=int((_t_now - _t_start) * 1000),
+            )
 
             yield _sse(
                 "done",

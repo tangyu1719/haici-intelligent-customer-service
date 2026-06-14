@@ -19,3 +19,14 @@ def eval_overview(
     _user: User = Depends(get_current_user),
 ):
     return build_eval_overview(db, days=days)
+
+
+@router.get("/rag-metrics")
+def rag_metrics(
+    limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """RAG 对话详细指标：问题/QW改写/RAG检索词/匹配分/延迟等"""
+    from app.services.eval_service import build_rag_metrics
+    return build_rag_metrics(db, limit=limit)

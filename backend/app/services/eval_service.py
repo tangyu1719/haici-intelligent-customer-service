@@ -82,3 +82,64 @@ def build_eval_overview(db: Session, *, days: int = 7) -> dict:
         "daily_trend": daily,
         "types": list(AGENT_API_TYPES),
     }
+
+
+def build_rag_metrics(db: Session, *, limit: int = 50) -> dict:
+    """提取最近的 RAG 对话指标详情"""
+    rows = (
+        db.query(SysLogApiCall)
+        .filter(SysLogApiCall.api_type == "rag")
+        .order_by(SysLogApiCall.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    items: list[dict] = []
+    for r in rows:
+        meta = _parse_meta(r.response_summary)
+        items.append({
+            "id": r.log_id,
+            "trace_id": r.trace_id,
+            "question": meta.get("question", "")[:200],
+            "intent": meta.get("intent", ""),
+            "intent_label": meta.get("intent_label", ""),
+            "rewritten_query": meta.get("rewritten_query", "")[:200],
+            "rag_query": meta.get("rag_query", "")[:200],
+            "keywords": meta.get("keywords", []),
+            "retrieval_terms": meta.get("retrieval_terms", []),
+            "citations_count": meta.get("citations_count", 0),
+            "top_score": meta.get("top_score", 0.0),
+            "anti_dilution": meta.get("anti_dilution", False),
+            "kb_id": meta.get("kb_id"),
+            "auto_routed": meta.get("auto_routed", False),
+            "llm_provider": meta.get("llm_provider", ""),
+            "llm_model": meta.get("llm_model", ""),
+            "llm_task_type": meta.get("llm_task_type", ""),
+            "answer_length": meta.get("answer_length", 0),
+            "follow_ups_count": meta.get("follow_ups_count", 0),
+            "total_tokens": meta.get("total_tokens", 0),
+            "time_consume_ms": r.time_consume_ms,
+            "success": r.success == 1,
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+        })
+
+    # 计算聚合指标
+    success_count = sum(1 for i in items if i["success"])
+    avg_top_score = round(sum(i["top_score"] for i in items) / len(items), 4) if items else 0
+    avg_citations = round(sum(i["citations_count"] for i in items) / len(items), 4) if items else 0
+    avg_latency = round(sum(i["time_consume_ms"] for i in items) / len(items), 0) if items else 0
+    avg_answer_len = round(sum(i["answer_length"] for i in items) / len(items), 0) if items else 0
+    anti_dilution_count = sum(1 for i in items if i["anti_dilution"])
+
+    return {
+        "total": len(items),
+        "success_count": success_count,
+        "fail_count": len(items) - success_count,
+        "fail_rate": round((len(items) - success_count) / max(len(items), 1), 4),
+        "avg_top_score": avg_top_score,
+        "avg_citations": avg_citations,
+        "avg_latency_ms": avg_latency,
+        "avg_answer_length": avg_answer_len,
+        "anti_dilution_count": anti_dilution_count,
+        "items": items,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
