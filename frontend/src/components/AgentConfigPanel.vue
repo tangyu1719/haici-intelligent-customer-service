@@ -217,6 +217,7 @@ onMounted(async () => {
           编辑各 Agent 的 <code>AGENT.md</code> Prompt 模板。保存后写入
           <code>backend/data/agent_config.json</code> 与对应
           <code>backend/data/agents/{agent_key}/AGENT.md</code>，<strong>需重启后端</strong>后生效；仅影响后续新入库文档或未来接入的链路。
+          <router-link to="/admin/agent-gateway" class="agent-gateway-link">添加/管理 LLM 模型节点请前往 Agent 网关 → 模型连接</router-link>
         </p>
       </div>
       <div v-if="msg" class="agent-page-toast" :class="msgIsError ? 'is-error' : 'is-success'">
@@ -469,6 +470,18 @@ onMounted(async () => {
   background: #f1f5f9;
   color: #475569;
   font-family: ui-monospace, monospace;
+}
+
+.agent-gateway-link {
+  display: block;
+  margin-top: 8px;
+  color: #2563eb;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.agent-gateway-link:hover {
+  text-decoration: underline;
 }
 
 .agent-page-toast {
