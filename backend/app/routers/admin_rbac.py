@@ -156,7 +156,8 @@ PERMISSION_MODULES: dict[str, dict] = {
     "session": {"label": "会话管理", "icon": "fa-clock", "desc": "对话会话记录", "perms": [
         {"key": "session:view", "label": "查看会话列表"},
         {"key": "session:detail", "label": "查看会话详情与消息历史"},
-        {"key": "session:view:all", "label": "查看全部用户的会话历史（可按用户筛选）"},
+        {"key": "session:view:all", "label": "在「会话历史」中查看全部用户会话（可按用户筛选）"},
+        {"key": "system:session:view", "label": "会话审计（运维评测菜单，含用户已删记录）"},
     ]},
     "kb": {"label": "知识库管理", "icon": "fa-database", "desc": "知识库文档+向量", "perms": [
         {"key": "kb:view", "label": "查看知识库文档列表"},
