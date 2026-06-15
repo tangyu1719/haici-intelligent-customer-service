@@ -3,7 +3,16 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Dict, Literal, Optional
+
+
+@dataclass(frozen=True)
+class LLMStreamDelta:
+    """流式增量：DeepSeek 等模型 reasoning 与正文分离。"""
+
+    kind: Literal["think", "answer"]
+    content: str
 
 import httpx
 
@@ -47,6 +56,68 @@ def _openai_chat_url(base_url: str) -> str:
 
 
 
+
+
+def _is_thinking_model(node: GatewayNode) -> bool:
+    """判断是否支持 reasoning_content 深度思考流。"""
+    blob = f"{node.name} {node.model}".lower()
+    return any(k in blob for k in ("deepseek", "r1", "reason", "thinking"))
+
+
+def _pick_stream_text(val: object) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, dict):
+        for k in ("content", "text", "reasoning_content", "reasoning", "thinking_content"):
+            if val.get(k):
+                return str(val[k])
+        return ""
+    return str(val)
+
+
+# 网关流式 delta / message 中「思考过程」与「正文」字段映射（OpenAI 兼容 + 火山方舟 DeepSeek）
+REASONING_DELTA_KEYS = (
+    "reasoning_content",
+    "reasoning",
+    "thinking_content",
+    "thinking",
+    "reasoning_text",
+    "thought",
+)
+ANSWER_DELTA_KEYS = ("content", "text", "output_text")
+
+
+def _split_stream_delta(delta_obj: dict, message_obj: dict | None = None) -> tuple[str, str]:
+    """从 OpenAI 兼容 delta / message 中拆分思考与正文。"""
+    reasoning = ""
+    for key in REASONING_DELTA_KEYS:
+        raw = delta_obj.get(key)
+        if raw:
+            reasoning = _pick_stream_text(raw)
+            break
+    if not reasoning and message_obj:
+        for key in REASONING_DELTA_KEYS:
+            raw = message_obj.get(key)
+            if raw:
+                reasoning = _pick_stream_text(raw)
+                break
+
+    content = ""
+    for key in ANSWER_DELTA_KEYS:
+        raw = delta_obj.get(key)
+        if raw:
+            content = _pick_stream_text(raw)
+            break
+    if not content and message_obj:
+        for key in ANSWER_DELTA_KEYS:
+            raw = message_obj.get(key)
+            if raw:
+                content = _pick_stream_text(raw)
+                break
+
+    return reasoning, content
 
 
 class LLMWrapper:
@@ -204,13 +275,13 @@ class LLMWrapper:
 
 
 
-    async def stream_chat(self, messages: list[dict[str, str]], task_type: str = "qa") -> AsyncIterator[str]:
+    async def stream_chat(self, messages: list[dict[str, str]], task_type: str = "qa") -> AsyncIterator[LLMStreamDelta]:
 
         node = self._resolve_node(task_type)
 
         if not node or not node.api_key:
 
-            yield "【配置错误】请在 .env 中配置 QWEN_API_KEY 或 ARK_API_KEY。"
+            yield LLMStreamDelta("answer", "【配置错误】请在 .env 中配置 QWEN_API_KEY 或 ARK_API_KEY。")
 
             return
 
@@ -236,6 +307,8 @@ class LLMWrapper:
             "temperature": 0.2,
             "max_tokens": 1024,
         }
+        if _is_thinking_model(node):
+            payload["thinking"] = {"type": "enabled"}
 
         url = _openai_chat_url(node.base_url)
 
@@ -253,7 +326,7 @@ class LLMWrapper:
             from app.services.agent_call_logger import log_agent_call
 
             t0 = time.perf_counter()
-            parts: list[str] = []
+            answer_parts: list[str] = []
             async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS, trust_env=False) as client:
 
                 async with client.stream("POST", url, headers=headers, json=payload) as resp:
@@ -276,7 +349,7 @@ class LLMWrapper:
 
                         )
 
-                        yield f"【服务异常】大模型暂时不可用（{node.name}）。"
+                        yield LLMStreamDelta("answer", f"【服务异常】大模型暂时不可用（{node.name}）。")
 
                         return
 
@@ -296,11 +369,17 @@ class LLMWrapper:
 
                             chunk = json.loads(data)
 
-                            delta = chunk["choices"][0]["delta"].get("content")
+                            choice = chunk["choices"][0]
+                            delta_obj = choice.get("delta") or {}
+                            message_obj = choice.get("message") or {}
 
-                            if delta:
-                                parts.append(delta)
-                                yield delta
+                            reasoning, content = _split_stream_delta(delta_obj, message_obj)
+
+                            if reasoning:
+                                yield LLMStreamDelta("think", reasoning)
+                            if content:
+                                answer_parts.append(content)
+                                yield LLMStreamDelta("answer", content)
 
                         except (json.JSONDecodeError, KeyError, IndexError):
 
@@ -308,7 +387,7 @@ class LLMWrapper:
 
         except httpx.TimeoutException:
 
-            yield "【请求超时】大模型响应超时，请稍后重试。"
+            yield LLMStreamDelta("answer", "【请求超时】大模型响应超时，请稍后重试。")
 
         except httpx.HTTPError as exc:
 
@@ -322,12 +401,12 @@ class LLMWrapper:
 
             )
 
-            yield "【网络错误】无法连接大模型服务，请检查网络或 API Key。"
+            yield LLMStreamDelta("answer", "【网络错误】无法连接大模型服务，请检查网络或 API Key。")
         finally:
             try:
                 from app.services.agent_call_logger import log_agent_call
 
-                full = "".join(parts)
+                full = "".join(answer_parts)
                 log_agent_call(
                     api_type="llm",
                     target=f"{node.provider}:{node.model}",
@@ -368,19 +447,25 @@ _embedder = None
 
 
 def get_pipeline_llm():
-    """意图识别/Query改写专用LLM：优先Ollama本地模型(快)，否则走网关"""
-    ollama_base = os.getenv("OLLAMA_BASE_URL", "").strip()
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2:0.5b").strip()
-    if ollama_base and ollama_model:
-        from app.services.llm_gateway import GatewayNode
-        node = GatewayNode(
-            id="ollama_pipeline", name="Ollama Pipeline", provider="openai_compatible",
-            base_url=ollama_base, api_key="ollama", model=ollama_model,
-            priority=1, weight=100, status="active",
-        )
-        logger.info("[LLM-Pipeline] 使用Ollama本地模型: %s @ %s", ollama_model, ollama_base)
-        return node
-    return None
+    """意图识别/Query 改写专用 LLM：优先 Ollama 本地（毫秒级），失败再走主网关。"""
+    ollama_base = (os.getenv("OLLAMA_BASE_URL", "") or settings.OLLAMA_BASE_URL).strip()
+    ollama_model = (os.getenv("OLLAMA_MODEL", "") or settings.OLLAMA_MODEL).strip()
+    if not ollama_base or not ollama_model:
+        return None
+    from app.services.llm_gateway import GatewayNode
+
+    node = GatewayNode(
+        id="ollama_pipeline",
+        name="Ollama Pipeline",
+        provider="openai_compatible",
+        base_url=ollama_base,
+        api_key="ollama",
+        model=ollama_model,
+        priority=1,
+        weight=100,
+        status="active",
+    )
+    return node
 
 
 
