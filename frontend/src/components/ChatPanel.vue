@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { authHeaders, getAccessToken } from '../api/auth'
 import ChatAssistantMessage from './ChatAssistantMessage.vue'
 import ListPagination from './ListPagination.vue'
@@ -7,7 +7,7 @@ import { hydrateMsgCitations } from '../utils/ragCitations'
 import { INTENT_LABELS } from '../utils/intentLabels'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 import { useSpeechInput } from '../utils/useSpeechInput'
-import type { ChatAttachment, ChatMessage, ChatPendingUpload, ChatSessionItem, KnowledgeBaseBrief, PlatformHealthSnapshot } from '../types'
+import type { ChatAttachment, ChatFaqItem, ChatMessage, ChatPendingUpload, ChatSessionItem, KnowledgeBaseBrief, PlatformHealthSnapshot } from '../types'
 
 const bearerOnly = (): Record<string, string> => {
   const t = getAccessToken()
@@ -16,14 +16,85 @@ const bearerOnly = (): Record<string, string> => {
 
 const MAX_PENDING_UPLOADS = 6
 const LAST_SESSION_KEY = 'hc_last_chat_session_id'
+const STREAM_DRAFT_PREFIX = 'hc_chat_stream_draft_'
+
+type StreamDraft = {
+  sessionId: number
+  content: string
+  intent?: string
+  intentLabel?: string
+  updatedAt: number
+}
+
+const streamDraftKey = (sid: number): string => `${STREAM_DRAFT_PREFIX}${sid}`
+
+const saveStreamDraft = (sid: number | null, msg: ChatMessage): void => {
+  if (!sid) return
+  const text = (msg.content || '').trim()
+  if (!text || text.startsWith('正在')) return
+  const payload: StreamDraft = {
+    sessionId: sid,
+    content: msg.content,
+    intent: msg.intent,
+    intentLabel: msg.intentLabel,
+    updatedAt: Date.now(),
+  }
+  sessionStorage.setItem(streamDraftKey(sid), JSON.stringify(payload))
+}
+
+const clearStreamDraft = (sid: number | null): void => {
+  if (!sid) return
+  sessionStorage.removeItem(streamDraftKey(sid))
+}
+
+/** 刷新页面后：若 DB 尚未落库，用本地草稿补回被截断的回答 */
+const applyStreamDraftIfAny = (sid: number): void => {
+  const raw = sessionStorage.getItem(streamDraftKey(sid))
+  if (!raw) return
+  try {
+    const draft = JSON.parse(raw) as StreamDraft
+    if (draft.sessionId !== sid) return
+    const draftContent = (draft.content || '').trim()
+    if (!draftContent) {
+      clearStreamDraft(sid)
+      return
+    }
+    const last = messages.value[messages.value.length - 1]
+    if (last?.role === 'assistant' && (last.content || '').trim().length >= draftContent.length) {
+      clearStreamDraft(sid)
+      return
+    }
+    const restored: ChatMessage = {
+      role: 'assistant',
+      content: draftContent,
+      intent: draft.intent || '',
+      intentLabel: draft.intentLabel || draft.intent || '',
+      citations: [],
+      ragPrefetchSlices: [],
+      messageId: null,
+      isStreaming: false,
+      streamInterrupted: true,
+    }
+    if (last?.role === 'assistant' && !(last.content || '').trim()) {
+      messages.value[messages.value.length - 1] = restored
+    } else if (last?.role !== 'assistant') {
+      messages.value.push(restored)
+    }
+    hydrateMsgCitations(restored)
+    clearStreamDraft(sid)
+  } catch {
+    clearStreamDraft(sid)
+  }
+}
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const isWaiting = ref(false)
+let activeStreamAssistant: ChatMessage | null = null
 const sessionId = ref<number | null>(null)
 const chatSessions = ref<ChatSessionItem[]>([])
 const sessionTotal = ref(0)
-const sessionQuery = ref<ListQueryState>({ ...defaultListQuery(15), sortBy: 'updated_at', sortOrder: 'desc' })
+const sessionQuery = ref<ListQueryState>({ ...defaultListQuery(10), sortBy: 'updated_at', sortOrder: 'desc' })
 const sessionSearchOpen = ref(false)
 const health = ref<PlatformHealthSnapshot | null>(null)
 const healthLoading = ref(false)
@@ -40,10 +111,12 @@ const dailyQuota = ref({
 })
 const kbList = ref<KnowledgeBaseBrief[]>([])
 const selectedKbId = ref<number | null>(null)
+const faqItems = ref<ChatFaqItem[]>([])
 const pendingUploads = ref<ChatPendingUpload[]>([])
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const inputTextareaRef = ref<HTMLTextAreaElement | null>(null)
+let sessionPollTimer: ReturnType<typeof setInterval> | null = null
 
 const resizeInputTextarea = (): void => {
   void nextTick(() => {
@@ -75,6 +148,11 @@ const canSend = computed(() => {
   const uploading = pendingUploads.value.some((u) => u.uploading)
   return (hasText || hasReadyUpload) && !uploading
 })
+
+/** 已有流式助手气泡时不重复显示底部 wave-loader */
+const showStreamWaiting = computed(
+  () => isWaiting.value && !messages.value.some((m) => m.role === 'assistant' && m.isStreaming),
+)
 
 const fmtDateShort = (s?: string): string => {
   if (!s) return '-'
@@ -151,6 +229,7 @@ const loadChatConfig = async (): Promise<void> => {
         remaining,
         unlimited: !!data.daily_quota_unlimited,
       }
+      faqItems.value = Array.isArray(data.faq_items) ? data.faq_items : []
     }
   } catch {
     maxQuestionLength.value = 500
@@ -225,18 +304,52 @@ const ensureSession = async (): Promise<number> => {
 }
 
 const loadSessionMessages = async (id: number): Promise<void> => {
-  const qs = toSearchParams({ ...defaultListQuery(500), sortBy: 'created_at', sortOrder: 'asc', page: 1, keyword: '', dateFrom: '', dateTo: '', id: '', name: '' })
+  const qs = toSearchParams({ ...defaultListQuery(100), sortBy: 'created_at', sortOrder: 'asc', page: 1, keyword: '', dateFrom: '', dateTo: '', id: '', name: '' })
   const res = await fetch(`/api/v1/sessions/${id}/messages?${qs}`, { headers: authHeaders() })
   if (!res.ok) {
     const fallback = await fetch(`/api/v1/sessions/${id}`, { headers: authHeaders() })
     if (!fallback.ok) return
     const data = await fallback.json()
     messages.value = mapHistoryMessages(data.messages || [])
+    applyStreamDraftIfAny(id)
     return
   }
   const data = await res.json()
   messages.value = mapHistoryMessages(data.items || [])
+  applyStreamDraftIfAny(id)
   scrollToBottom()
+}
+
+const stopSessionPoll = (): void => {
+  if (sessionPollTimer) {
+    clearInterval(sessionPollTimer)
+    sessionPollTimer = null
+  }
+}
+
+const sessionNeedsPoll = (sid: number): boolean => {
+  const cur = chatSessions.value.find((s) => s.id === sid)
+  if (cur?.meta?.streaming) return true
+  const last = messages.value[messages.value.length - 1]
+  return !!last && last.role === 'user'
+}
+
+/** 后台仍在生成时轮询 DB，刷新/切页回来后自动补全回答 */
+const pollSessionUntilReady = (sid: number): void => {
+  stopSessionPoll()
+  if (!sessionNeedsPoll(sid)) return
+  isWaiting.value = true
+  let attempts = 0
+  sessionPollTimer = setInterval(async () => {
+    attempts += 1
+    await loadSessionMessages(sid)
+    await loadChatSessions()
+    if (!sessionNeedsPoll(sid) || attempts >= 45) {
+      stopSessionPoll()
+      isWaiting.value = false
+      scrollToBottom()
+    }
+  }, 2000)
 }
 
 const mapHistoryMessages = (rows: { role: string; content: string; intent_label?: string; citations?: unknown; id: number; created_at?: string }[]): ChatMessage[] =>
@@ -260,14 +373,18 @@ const mapHistoryMessages = (rows: { role: string; content: string; intent_label?
 const switchSession = async (id: number): Promise<void> => {
   if (isWaiting.value) return
   speechInput.stop()
+  stopSessionPoll()
   sessionId.value = id
   saveLastSession(id)
   await loadSessionMessages(id)
+  pollSessionUntilReady(id)
 }
 
 const newSession = async (): Promise<void> => {
   if (isWaiting.value) return
   speechInput.stop()
+  stopSessionPoll()
+  isWaiting.value = false
   const res = await fetch('/api/v1/sessions', { method: 'POST', headers: authHeaders() })
   if (!res.ok) return
   const data = await res.json()
@@ -307,9 +424,12 @@ const saveEditSession = async (id: number): Promise<void> => {
 
 const archiveSession = async (id: number, e: Event): Promise<void> => {
   e.stopPropagation()
-  if (isWaiting.value || !window.confirm('确定删除该会话？删除后将从列表中隐藏。')) return
+  if (isWaiting.value || !window.confirm('确定删除该会话？删除后将从您的列表中隐藏，管理员仍可在「会话审计」中查看完整记录。')) return
   const res = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
-  if (!res.ok) return
+  if (!res.ok) {
+    window.alert('删除失败，请稍后重试')
+    return
+  }
   if (sessionId.value === id) {
     sessionId.value = null
     messages.value = []
@@ -434,6 +554,7 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
     alert('请先移除上传失败的附件')
     return
   }
+  isWaiting.value = true
   speechInput.stop()
   await ensureSession()
   const displayContent = text || (attachments.length === 1 ? `[附件] ${attachments[0].name}` : `[${attachments.length} 个附件]`)
@@ -442,35 +563,148 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
     content: displayContent,
     image: attachments.find((a) => a.type === 'image' && a.preview)?.preview,
     attachments: attachments.length ? attachments : undefined,
+    createdAt: new Date().toISOString(),
   })
   if (!forcedText) {
     inputText.value = ''
     pendingUploads.value = []
   }
-  isWaiting.value = true
   scrollToBottom()
 
   let streamAssistantMsg: ChatMessage | null = null
+  let streamDone = false
+  const pendingTokenChunks: string[] = []
+  const pendingThinkChunks: string[] = []
+  let tokenFlushScheduled = false
+  let thinkFlushScheduled = false
+  activeStreamAssistant = null
   const ensureAssistant = (): ChatMessage => {
     if (!streamAssistantMsg) {
-      streamAssistantMsg = {
+      streamAssistantMsg = reactive({
         role: 'assistant',
         content: '',
         intent: '',
         citations: [],
         ragPrefetchSlices: [],
+        thinkContent: '',
+        isThinking: false,
+        thinkCollapsed: false,
+        phaseStatus: '',
+        retrievalCount: 0,
         messageId: null,
         isStreaming: true,
-      }
+      } as ChatMessage)
       messages.value.push(streamAssistantMsg)
+      activeStreamAssistant = streamAssistantMsg
     }
     return streamAssistantMsg
   }
 
+  const flushPendingTokens = (forceAll = false): void => {
+    tokenFlushScheduled = false
+    const bot = streamAssistantMsg
+    if (!bot || pendingTokenChunks.length === 0) return
+    if (forceAll) {
+      bot.content += pendingTokenChunks.join('')
+      pendingTokenChunks.length = 0
+      saveStreamDraft(sessionId.value, bot)
+      scrollToBottom()
+      return
+    }
+    // 每帧吐出一小段，即使代理一次性送达也能看到打字效果
+    let budget = 16
+    while (pendingTokenChunks.length > 0 && budget > 0) {
+      const head = pendingTokenChunks[0]
+      if (head.length <= budget) {
+        bot.content += head
+        budget -= head.length
+        pendingTokenChunks.shift()
+      } else {
+        bot.content += head.slice(0, budget)
+        pendingTokenChunks[0] = head.slice(budget)
+        budget = 0
+      }
+    }
+    saveStreamDraft(sessionId.value, bot)
+    scrollToBottom()
+    if (pendingTokenChunks.length > 0) scheduleTokenFlush()
+  }
+
+  const scheduleTokenFlush = (): void => {
+    if (tokenFlushScheduled) return
+    tokenFlushScheduled = true
+    requestAnimationFrame(() => flushPendingTokens(false))
+  }
+
+  const flushPendingThink = (forceAll = false): void => {
+    thinkFlushScheduled = false
+    const bot = streamAssistantMsg
+    if (!bot || pendingThinkChunks.length === 0) return
+    if (forceAll) {
+      bot.thinkContent = (bot.thinkContent || '') + pendingThinkChunks.join('')
+      pendingThinkChunks.length = 0
+      scrollToBottom()
+      return
+    }
+    let budget = 24
+    while (pendingThinkChunks.length > 0 && budget > 0) {
+      const head = pendingThinkChunks[0]
+      if (head.length <= budget) {
+        bot.thinkContent = (bot.thinkContent || '') + head
+        budget -= head.length
+        pendingThinkChunks.shift()
+      } else {
+        bot.thinkContent = (bot.thinkContent || '') + head.slice(0, budget)
+        pendingThinkChunks[0] = head.slice(budget)
+        budget = 0
+      }
+    }
+    scrollToBottom()
+    if (pendingThinkChunks.length > 0) scheduleThinkFlush()
+  }
+
+  const scheduleThinkFlush = (): void => {
+    if (thinkFlushScheduled) return
+    thinkFlushScheduled = true
+    requestAnimationFrame(() => flushPendingThink(false))
+  }
+
+  const appendStreamToken = (bot: ChatMessage, piece: string): void => {
+    const token = String(piece || '')
+    if (!token) return
+    flushPendingThink(true)
+    if (bot.thinkContent && !bot.thinkCollapsed) {
+      bot.thinkCollapsed = true
+    }
+    bot.isThinking = false
+    bot.phaseStatus = ''
+    pendingTokenChunks.push(token)
+    scheduleTokenFlush()
+  }
+
+  const appendThinkToken = (bot: ChatMessage, piece: string): void => {
+    const token = String(piece || '')
+    if (!token) return
+    bot.isThinking = true
+    bot.thinkCollapsed = false
+    pendingThinkChunks.push(token)
+    scheduleThinkFlush()
+  }
+
+  // 立刻展示助手气泡与阶段提示，避免长时间只有底部 loading
+  const starter = ensureAssistant()
+  starter.phaseStatus = '正在理解…'
+  starter.content = ''
+
   try {
     const res = await fetch('/api/v1/chat/stream', {
       method: 'POST',
-      headers: authHeaders(),
+      cache: 'no-store',
+      headers: {
+        ...authHeaders(),
+        Accept: 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
       body: JSON.stringify({
         session_id: sessionId.value,
         question: text,
@@ -486,6 +720,10 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
       } catch {
         /* ignore */
       }
+      if (res.status === 409 && sessionId.value) {
+        pollSessionUntilReady(sessionId.value)
+        return
+      }
       ensureAssistant().content = detail
       return
     }
@@ -500,6 +738,7 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
       const parts = buffer.split('\n\n')
       buffer = parts.pop() || ''
       for (const part of parts) {
+        if (!part.trim() || part.trimStart().startsWith(':')) continue
         let event = 'message'
         let dataLine = ''
         part.split('\n').forEach((line) => {
@@ -510,8 +749,17 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
         const data = JSON.parse(dataLine)
         const bot = ensureAssistant()
         if (event === 'status') {
-          // 临时状态提示，不混入正文
-          bot.content = data.text || ''
+          const phase = String(data.phase || '')
+          if (phase === 'retrieval_done') {
+            bot.retrievalCount = Number(data.count ?? bot.retrievalCount ?? 0)
+            bot.phaseStatus = ''
+          } else if (phase === 'thinking') {
+            bot.phaseStatus = ''
+          } else if (phase === 'generating') {
+            bot.phaseStatus = ''
+          } else if (!bot.ragPrefetchSlices?.length && !(bot.content || '').trim()) {
+            bot.phaseStatus = data.text || ''
+          }
         }
         if (event === 'meta') {
           bot.intent = data.intent
@@ -521,20 +769,26 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           bot.llmModel = data.llm_model
           if (data.pipeline) bot.pipeline = data.pipeline
         }
-        if (event === 'token') {
-          // 收到第一个真实token时清除状态提示
-          if (bot.content && (bot.content.startsWith('正在') || bot.content === '')) {
-            bot.content = ''
+        if (event === 'intent') {
+          bot.intent = data.intent || bot.intent
+          bot.intentLabel = data.intent_label || data.intent || bot.intentLabel
+          if (data.source) {
+            bot.pipeline = { ...(bot.pipeline || {}), source: data.source }
           }
-          bot.content += data.content || ''
+        }
+        if (event === 'think') {
+          appendThinkToken(bot, data.content || '')
           scrollToBottom()
+        }
+        if (event === 'token') {
+          appendStreamToken(bot, data.content || '')
         }
         if (event === 'citations') {
           bot.ragPrefetchSlices = data.slices || data.items || []
           bot.citations = data.items || []
-        }
-        if (event === 'token') {
-          bot.content += data.content || ''
+          hydrateMsgCitations(bot)
+          bot.retrievalCount = bot.ragCitationSlices?.length ?? bot.ragPrefetchSlices?.length ?? 0
+          bot.phaseStatus = ''
           scrollToBottom()
         }
         if (event === 'follow_ups') {
@@ -544,23 +798,52 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
             : []
           scrollToBottom()
         }
-        if (event === 'done') bot.messageId = data.assistant_message_id
+        if (event === 'done') {
+          flushPendingThink(true)
+          flushPendingTokens(true)
+          streamDone = true
+          bot.isThinking = false
+          if (bot.thinkContent) bot.thinkCollapsed = true
+          bot.phaseStatus = ''
+          bot.messageId = data.assistant_message_id
+          const finalText = String(data.content || '').trim()
+          if (finalText && (!bot.content || bot.content.startsWith('正在'))) {
+            bot.content = finalText
+          } else if (finalText && finalText.length > (bot.content || '').length) {
+            bot.content = finalText
+          }
+          clearStreamDraft(sessionId.value)
+        }
       }
     }
     await loadChatSessions()
   } catch {
     const bot = ensureAssistant()
-    bot.content = bot.content || '网络连接异常，请检查后端服务。'
+    if (!streamDone && (bot.content || '').trim() && !(bot.content || '').startsWith('正在')) {
+      bot.streamInterrupted = true
+      saveStreamDraft(sessionId.value, bot)
+    } else if (!streamDone) {
+      bot.content = '网络连接异常，请检查后端服务。'
+    }
   } finally {
+    flushPendingThink(true)
+    flushPendingTokens(true)
     if (streamAssistantMsg) {
       const finished = streamAssistantMsg as ChatMessage
       finished.isStreaming = false
+      if (!streamDone && (finished.content || '').trim() && !(finished.content || '').startsWith('正在')) {
+        finished.streamInterrupted = true
+      }
       if (!finished.createdAt) finished.createdAt = new Date().toISOString()
       hydrateMsgCitations(finished)
     }
     isWaiting.value = false
+    activeStreamAssistant = null
     scrollToBottom()
     void loadChatConfig()
+    if (sessionId.value && sessionNeedsPoll(sessionId.value)) {
+      pollSessionUntilReady(sessionId.value)
+    }
   }
 }
 
@@ -581,7 +864,93 @@ const sendFollowUp = (text: string): void => {
   sendMessage(q)
 }
 
+const faqCategories = computed(() => {
+  const cats = new Set<string>()
+  for (const item of faqItems.value) {
+    if (item.category) cats.add(item.category)
+  }
+  return Array.from(cats)
+})
+
+const faqByCategory = (category: string): ChatFaqItem[] =>
+  faqItems.value.filter((item) => item.category === category)
+
+const askFaq = async (item: ChatFaqItem): Promise<void> => {
+  if (isWaiting.value || !item?.id) return
+  isWaiting.value = true
+  speechInput.stop()
+  await ensureSession()
+  if (!sessionId.value) {
+    isWaiting.value = false
+    return
+  }
+
+  messages.value.push({
+    role: 'user',
+    content: item.question,
+    createdAt: new Date().toISOString(),
+  })
+
+  const assistant = reactive({
+    role: 'assistant',
+    content: '',
+    intent: 'faq_cached',
+    intentLabel: 'FAQ 缓存',
+    citations: [],
+    ragPrefetchSlices: [],
+    messageId: null,
+    isStreaming: true,
+  } as ChatMessage)
+  messages.value.push(assistant)
+  scrollToBottom()
+
+  try {
+    const res = await fetch('/api/v1/chat/faq-apply', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId.value, faq_id: item.id }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || 'FAQ 加载失败')
+
+    const answer = String(data.answer || '')
+    const step = 4
+    for (let i = 0; i < answer.length; i += step) {
+      assistant.content = answer.slice(0, Math.min(i + step, answer.length))
+      scrollToBottom()
+      await new Promise((resolve) => window.setTimeout(resolve, 16))
+    }
+    assistant.content = answer
+    assistant.messageId = data.assistant_message_id ?? null
+    assistant.isStreaming = false
+    await loadChatSessions()
+  } catch (e) {
+    assistant.content = (e as Error).message || 'FAQ 加载失败，请稍后重试'
+    assistant.isStreaming = false
+  } finally {
+    isWaiting.value = false
+    scrollToBottom()
+  }
+}
+
+const regenerateReply = (userQuestion: string): void => {
+  const q = userQuestion.trim()
+  if (!q || isWaiting.value) return
+  const last = messages.value[messages.value.length - 1]
+  if (last?.role === 'assistant' && last.streamInterrupted) {
+    messages.value.pop()
+  }
+  void sendMessage(q)
+}
+
 watch(() => [sessionQuery.value.page, sessionQuery.value.size], loadChatSessions)
+
+onBeforeUnmount(() => {
+  stopSessionPoll()
+  if (isWaiting.value && activeStreamAssistant && sessionId.value) {
+    saveStreamDraft(sessionId.value, activeStreamAssistant)
+  }
+})
 
 onMounted(async () => {
   await loadChatConfig()
@@ -647,10 +1016,10 @@ onMounted(async () => {
               <button
                 type="button"
                 class="session-delete-btn shrink-0"
-                title="删除会话"
+                title="从界面删除（管理员仍可审计）"
                 @click="archiveSession(s.id, $event)"
               >
-                🗑
+                删除
               </button>
               <div class="session-item-main flex-1 min-w-0">
                 <div class="flex items-start justify-between gap-2 mb-1">
@@ -723,11 +1092,35 @@ onMounted(async () => {
           </div>
         </div>
         <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll min-h-0 relative" @scroll="onChatScroll">
-          <div v-if="messages.length === 0 && !isWaiting" class="h-full flex flex-col items-center justify-center text-[#363e42]/30">
-            <p class="font-black tracking-widest uppercase text-xs text-[#363e42]">智能客服 Agent 已就绪</p>
-            <p class="text-[11px] font-medium mt-2 opacity-50">基于 RAG 知识库问答，支持流式输出与引用溯源</p>
+          <div v-if="messages.length === 0 && !isWaiting" class="chat-welcome">
+            <div class="chat-welcome-head">
+              <p class="chat-welcome-title">智能客服 Agent 已就绪</p>
+              <p class="chat-welcome-desc">基于 RAG 知识库问答，支持流式输出与引用溯源</p>
+            </div>
+            <div v-if="faqItems.length" class="chat-faq-panel">
+              <div class="chat-faq-panel-hd">
+                <span class="chat-faq-panel-title">常见问题 FAQ</span>
+                <span class="chat-faq-panel-hint">标准答案已缓存，点击即展示，无需等待检索</span>
+              </div>
+              <div v-for="cat in faqCategories" :key="cat" class="chat-faq-group">
+                <div class="chat-faq-group-title">{{ cat }}</div>
+                <div class="chat-faq-grid">
+                  <button
+                    v-for="item in faqByCategory(cat)"
+                    :key="item.id"
+                    type="button"
+                    class="chat-faq-card"
+                    :disabled="isWaiting"
+                    @click="askFaq(item)"
+                  >
+                    <span class="chat-faq-q">{{ item.question }}</span>
+                    <span class="chat-faq-a">{{ item.answer }}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-for="(msg, index) in messages" :key="index" class="flex w-full min-w-0" :class="msg.role === 'user' ? 'justify-end' : ''">
+          <div v-for="(msg, index) in messages" :key="index" class="flex w-full min-w-0 flex-col" :class="msg.role === 'user' ? 'items-end' : 'items-start'">
             <div
               v-if="msg.role === 'user'"
               class="msg-bubble msg-bubble--user"
@@ -751,14 +1144,27 @@ onMounted(async () => {
                 :context-id="currentContextId"
                 :context-summary="buildContextSummary(index)"
                 @follow-up="sendFollowUp"
+                @regenerate="regenerateReply"
               />
             </div>
+            <span class="msg-time" :class="msg.role === 'user' ? 'text-right' : ''">{{ fmtDateShort(msg.createdAt) }}</span>
           </div>
-          <div v-if="isWaiting" class="flex justify-start">
+          <div v-if="showStreamWaiting" class="flex justify-start">
             <div class="p-4 rounded-2xl bg-white border shadow-sm">
               <div class="wave-loader"><div class="wave-dot"></div><div class="wave-dot"></div><div class="wave-dot"></div></div>
             </div>
           </div>
+          <transition name="fade">
+            <button
+              v-if="showScrollBtn"
+              type="button"
+              class="scroll-bottom-btn"
+              title="滚动到底部"
+              @click="scrollToBottom"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+          </transition>
         </div>
         <div class="p-4 bg-white/80 border-t shrink-0">
           <div class="w-full min-w-0 flex flex-col gap-1">
