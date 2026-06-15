@@ -91,102 +91,86 @@ onMounted(load)
           </div>
         </div>
 
-        <!-- 管道可视化 -->
+        <!-- ═══ 管道可视化 + 指标标注 ═══ -->
         <div class="bg-white border rounded-xl p-4 mb-4">
-          <h3 class="text-[12px] font-bold mb-3">RAG 管道</h3>
-          <div class="flex items-center gap-2 flex-wrap">
+          <h3 class="text-[12px] font-bold mb-1">RAG 管道 · 指标分布</h3>
+          <p class="text-[10px] text-[#94a3b8] mb-3">箭头标注每个环节关联的评测指标，点击指标展开定义和公式</p>
+
+          <!-- 管道横向主线 -->
+          <div class="flex items-center gap-1 mb-3 overflow-x-auto pb-2">
             <template v-for="(stage, idx) in report.pipeline_stages" :key="stage.id">
-              <div class="flex flex-col items-center">
-                <div class="w-10 h-10 rounded-full border-2 flex items-center justify-center text-lg"
-                  :class="idx <= 4 ? 'border-blue-300 bg-blue-50' : idx <= 6 ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'">
+              <div class="flex flex-col items-center shrink-0" :style="{minWidth:'70px'}">
+                <div class="w-9 h-9 rounded-full border-2 flex items-center justify-center text-base"
+                  :class="idx <= 3 ? 'border-blue-300 bg-blue-50' : idx <= 5 ? 'border-green-300 bg-green-50' : idx <= 7 ? 'border-purple-300 bg-purple-50' : 'border-amber-300 bg-amber-50'">
                   {{ stage.icon }}
                 </div>
-                <span class="text-[9px] mt-1 text-[#64748b]">{{ stage.label }}</span>
+                <span class="text-[8px] mt-0.5 text-[#64748b] text-center leading-tight">{{ stage.label }}</span>
               </div>
-              <span v-if="idx < report.pipeline_stages.length - 1" class="text-[#cbd5e1] text-lg">→</span>
+              <span v-if="idx < report.pipeline_stages.length - 1" class="text-[#cbd5e1] text-base shrink-0">→</span>
             </template>
           </div>
-          <div class="flex justify-between mt-2 text-[9px] text-[#94a3b8]">
-            <span>检索阶段</span>
-            <span>生成阶段</span>
-            <span>输出阶段</span>
-          </div>
-        </div>
 
-        <!-- 三层指标 -->
-        <div class="grid grid-cols-3 gap-4 mb-4">
-          <!-- 第一层：检索质量 -->
-          <div class="bg-white border rounded-xl p-4">
-            <div class="flex items-center gap-2 mb-3 pb-2 border-b">
-              <span class="text-lg">🔍</span>
-              <div>
-                <h3 class="text-[12px] font-bold">{{ report.layer1_retrieval.label }}</h3>
-                <p class="text-[9px] text-[#94a3b8]">{{ report.layer1_retrieval.description }}</p>
-              </div>
-            </div>
-            <div class="space-y-2">
-              <div v-for="m in report.layer1_retrieval.metrics" :key="m.key">
-                <div class="flex items-center justify-between text-[11px] cursor-pointer hover:bg-[#f8fafc] rounded px-1 py-0.5"
-                  @click="expandedMetric = expandedMetric === m.key ? null : m.key">
-                  <span class="font-bold">{{ m.name }}</span>
-                  <span class="font-mono font-bold" :class="m.status==='warn'?'text-red-500':m.status==='good'?'text-green-500':'text-amber-500'">{{ m.display_value }}</span>
+          <!-- 检索阶段指标 (蓝色) -->
+          <div class="mb-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+            <div class="text-[10px] font-bold text-blue-600 mb-1.5">▼ 检索质量指标（来自 🔍 向量检索 环节）</div>
+            <div class="flex flex-wrap gap-2">
+              <div v-for="m in report.layer1_retrieval.metrics" :key="m.key"
+                class="bg-white border rounded-lg px-2.5 py-1.5 cursor-pointer hover:shadow-sm transition-shadow"
+                :class="m.status==='warn'?'border-red-200':m.status==='good'?'border-green-200':'border-amber-200'"
+                @click="expandedMetric = expandedMetric === m.key ? null : m.key">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold">{{ m.name }}</span>
+                  <span class="text-[11px] font-mono font-black" :class="m.status==='warn'?'text-red-500':m.status==='good'?'text-green-500':'text-amber-500'">{{ m.display_value }}</span>
+                  <span class="text-[11px]">{{ statusEmoji(m.status) }}</span>
                 </div>
-                <div v-if="expandedMetric === m.key" class="bg-[#f8fafc] rounded-lg p-2 text-[10px] space-y-1 mb-1">
+                <div v-if="expandedMetric === m.key" class="mt-1.5 pt-1.5 border-t text-[9px] text-[#64748b] space-y-0.5">
                   <div><b>定义：</b>{{ m.description }}</div>
-                  <div><b>公式：</b><code class="text-[9px]">{{ m.formula }}</code></div>
-                  <div><b>范围：</b>{{ m.range }} | 优秀≥{{ m.threshold_good }} | 正常≥{{ m.threshold_ok }}</div>
-                  <div><b>当前状态：</b>{{ statusEmoji(m.status) }} {{ statusLabel(m.status) }}</div>
+                  <div><b>公式：</b><code class="text-[8px]">{{ m.formula }}</code></div>
+                  <div>优秀≥{{ m.threshold_good }} · 正常≥{{ m.threshold_ok }}</div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 第二层：生成一致性 -->
-          <div class="bg-white border rounded-xl p-4">
-            <div class="flex items-center gap-2 mb-3 pb-2 border-b">
-              <span class="text-lg">🤖</span>
-              <div>
-                <h3 class="text-[12px] font-bold">{{ report.layer2_generation.label }}</h3>
-                <p class="text-[9px] text-[#94a3b8]">{{ report.layer2_generation.description }}</p>
-              </div>
-            </div>
-            <div class="space-y-2">
-              <div v-for="m in report.layer2_generation.metrics" :key="m.key">
-                <div class="flex items-center justify-between text-[11px] cursor-pointer hover:bg-[#f8fafc] rounded px-1 py-0.5"
-                  @click="expandedMetric = expandedMetric === m.key ? null : m.key">
-                  <span class="font-bold">{{ m.name }}</span>
-                  <span class="font-mono font-bold" :class="m.value===0?'text-[#94a3b8]':m.status==='warn'?'text-red-500':m.status==='good'?'text-green-500':'text-amber-500'">{{ m.value > 0 ? m.display_value : '待评测' }}</span>
+          <!-- 生成阶段指标 (绿色/紫色) -->
+          <div class="mb-3 p-3 bg-green-50/50 rounded-lg border border-green-100">
+            <div class="text-[10px] font-bold text-green-600 mb-1.5">▼ 生成一致性指标（来自 🤖 LLM生成 环节）</div>
+            <div class="flex flex-wrap gap-2">
+              <div v-for="m in report.layer2_generation.metrics" :key="m.key"
+                class="bg-white border rounded-lg px-2.5 py-1.5 cursor-pointer hover:shadow-sm transition-shadow"
+                :class="m.value===0?'border-gray-200':m.status==='warn'?'border-red-200':m.status==='good'?'border-green-200':'border-amber-200'"
+                @click="expandedMetric = expandedMetric === m.key ? null : m.key">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold">{{ m.name }}</span>
+                  <span class="text-[11px] font-mono font-black" :class="m.value===0?'text-[#94a3b8]':m.status==='warn'?'text-red-500':'text-green-500'">{{ m.value > 0 ? m.display_value : '待评测' }}</span>
+                  <span v-if="m.value>0" class="text-[11px]">{{ statusEmoji(m.status) }}</span>
                 </div>
-                <div v-if="expandedMetric === m.key" class="bg-[#f8fafc] rounded-lg p-2 text-[10px] space-y-1 mb-1">
+                <div v-if="expandedMetric === m.key" class="mt-1.5 pt-1.5 border-t text-[9px] text-[#64748b] space-y-0.5">
                   <div><b>定义：</b>{{ m.description }}</div>
-                  <div><b>公式：</b><code class="text-[9px]">{{ m.formula }}</code></div>
-                  <div><b>范围：</b>{{ m.range }} | 优秀≥{{ m.threshold_good }} | 正常≥{{ m.threshold_ok }}</div>
+                  <div><b>公式：</b><code class="text-[8px]">{{ m.formula }}</code></div>
+                  <div>优秀≥{{ m.threshold_good }} · 正常≥{{ m.threshold_ok }}</div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 第三层：系统工程 -->
-          <div class="bg-white border rounded-xl p-4">
-            <div class="flex items-center gap-2 mb-3 pb-2 border-b">
-              <span class="text-lg">⚙️</span>
-              <div>
-                <h3 class="text-[12px] font-bold">{{ report.layer3_system.label }}</h3>
-                <p class="text-[9px] text-[#94a3b8]">{{ report.layer3_system.description }}</p>
-              </div>
-            </div>
-            <div class="space-y-2">
-              <div v-for="m in report.layer3_system.metrics" :key="m.key">
-                <div class="flex items-center justify-between text-[11px] cursor-pointer hover:bg-[#f8fafc] rounded px-1 py-0.5"
-                  @click="expandedMetric = expandedMetric === m.key ? null : m.key">
-                  <span class="font-bold">{{ m.name }}</span>
-                  <span class="font-mono font-bold" :class="m.status==='warn'?'text-red-500':m.status==='good'?'text-green-500':'text-amber-500'">{{ m.display_value }}{{ m.unit === 'ms' ? 'ms' : m.unit === 'req/s' ? '/s' : '' }}</span>
+          <!-- 系统指标 (灰色) -->
+          <div class="p-3 bg-gray-50/50 rounded-lg border border-gray-200">
+            <div class="text-[10px] font-bold text-gray-500 mb-1.5">▼ 系统工程指标（贯穿全管道）</div>
+            <div class="flex flex-wrap gap-2">
+              <div v-for="m in report.layer3_system.metrics" :key="m.key"
+                class="bg-white border rounded-lg px-2.5 py-1.5 cursor-pointer hover:shadow-sm transition-shadow"
+                :class="m.status==='warn'?'border-red-200':m.status==='good'?'border-green-200':'border-amber-200'"
+                @click="expandedMetric = expandedMetric === m.key ? null : m.key">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold">{{ m.name }}</span>
+                  <span class="text-[11px] font-mono font-black" :class="m.status==='warn'?'text-red-500':m.status==='good'?'text-green-500':'text-amber-500'">{{ m.display_value }}{{ m.unit==='ratio'?'':m.unit==='ms'?'ms':'' }}</span>
+                  <span class="text-[11px]">{{ statusEmoji(m.status) }}</span>
                 </div>
-                <div v-if="expandedMetric === m.key" class="bg-[#f8fafc] rounded-lg p-2 text-[10px] space-y-1 mb-1">
+                <div v-if="expandedMetric === m.key" class="mt-1.5 pt-1.5 border-t text-[9px] text-[#64748b] space-y-0.5">
                   <div><b>定义：</b>{{ m.description }}</div>
-                  <div><b>公式：</b><code class="text-[9px]">{{ m.formula }}</code></div>
-                  <div><b>范围：</b>{{ m.range }} | 优秀≤{{ m.threshold_good }}{{ m.unit }} | 正常≤{{ m.threshold_ok }}{{ m.unit }}</div>
-                  <div><b>当前状态：</b>{{ statusEmoji(m.status) }} {{ statusLabel(m.status) }}</div>
+                  <div><b>公式：</b><code class="text-[8px]">{{ m.formula }}</code></div>
+                  <div>{{ m.direction==='higher_better'?'优秀≥':'优秀≤' }}{{ m.threshold_good }} · {{ m.direction==='higher_better'?'正常≥':'正常≤' }}{{ m.threshold_ok }}</div>
                 </div>
               </div>
             </div>
