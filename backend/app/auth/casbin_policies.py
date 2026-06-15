@@ -7,7 +7,7 @@ VIEWER_API_POLICIES: list[tuple[str, str, str]] = [
     ("viewer", "/api/v1/auth/*", "GET|POST|PATCH|PUT|DELETE"),
     ("viewer", "/api/v1/chat/*", "GET|POST"),
     ("viewer", "/api/v1/sessions", "GET|POST"),
-    ("viewer", "/api/v1/sessions/*", "GET|PATCH|DELETE"),
+    ("viewer", "/api/v1/sessions/*", "GET|POST|PATCH|DELETE"),
     ("viewer", "/api/v1/knowledge", "GET|POST"),
     ("viewer", "/api/v1/knowledge/*", "GET|POST|DELETE"),
     ("viewer", "/api/v1/multimodal", "GET|POST"),
