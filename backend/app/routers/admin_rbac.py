@@ -291,3 +291,40 @@ def user_quota_detail(
         raise HTTPException(status_code=404, detail="用户不存在")
     roles = get_user_roles(db, user.id)
     return get_daily_quota_status(db, user, roles)
+
+
+class SaveRolePermissionsBody(BaseModel):
+    permissions: list[str] = Field(default_factory=list)
+
+
+@router.put("/roles/{role_id}/permissions")
+def save_role_permissions(
+    role_id: int,
+    body: SaveRolePermissionsBody,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """为角色配置模块化权限"""
+    role = db.get(RbacRole, role_id)
+    if not role:
+        raise HTTPException(status_code=404, detail="角色不存在")
+
+    # 清除旧权限
+    db.query(SysRoleMenu).filter(SysRoleMenu.role_id == role_id).delete()
+
+    # 根据permission值查找对应的menu_id并分配
+    for perm in body.permissions:
+        menu = db.query(SysMenu).filter(SysMenu.permission == perm).first()
+        if menu:
+            # 同时分配父菜单
+            if menu.parent_id and menu.parent_id != 0:
+                exists = db.query(SysRoleMenu).filter(
+                    SysRoleMenu.role_id == role_id,
+                    SysRoleMenu.menu_id == menu.parent_id,
+                ).first()
+                if not exists:
+                    db.add(SysRoleMenu(role_id=role_id, menu_id=menu.parent_id))
+            db.add(SysRoleMenu(role_id=role_id, menu_id=menu.id))
+
+    db.commit()
+    return {"ok": True, "role_id": role_id, "count": len(body.permissions)}
