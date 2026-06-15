@@ -44,6 +44,10 @@ class SessionListItem(BaseModel):
     updated_at: datetime
     message_count: int = 0
     meta: SessionMetaSummary | None = None
+    user_id: int | None = None
+    username: str | None = None
+    nickname: str | None = None
+    user_no: str | None = None
 
     class Config:
         from_attributes = True
