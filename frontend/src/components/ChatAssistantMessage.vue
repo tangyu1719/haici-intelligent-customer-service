@@ -22,12 +22,35 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   followUp: [text: string]
+  regenerate: [text: string]
 }>()
 
 const slicesOpen = ref(false)
 const annoOpen = ref(false)
 const sliceDetailOpen = ref<Record<number, boolean>>({})
+const activeStripSliceId = ref<number | null>(null)
+const thinkExpanded = ref(false)
 const lightboxSrc = ref('')
+const contentExpanded = ref(false)
+
+const CONTENT_COLLAPSE_LENGTH = 600
+
+const isLongContent = computed(() => {
+  const raw = answerBodyForMsg(props.msg)
+  return (raw || '').length > CONTENT_COLLAPSE_LENGTH
+})
+
+const shouldCollapse = computed(() => {
+  return !props.msg.isStreaming && isLongContent.value && !contentExpanded.value
+})
+
+const toggleContentExpand = () => {
+  contentExpanded.value = !contentExpanded.value
+}
+
+watch(() => props.msg.messageId, () => {
+  contentExpanded.value = false
+})
 
 const sliceHtmlCache = new Map<string, string>()
 
@@ -36,23 +59,79 @@ watch(
   () => {
     sliceHtmlCache.clear()
     sliceDetailOpen.value = {}
+    activeStripSliceId.value = null
+    thinkExpanded.value = false
   },
 )
 
 const slices = computed(() => ragCitationSlicesForMsg(props.msg))
 
+const activeStripSlice = computed(() => {
+  if (activeStripSliceId.value == null) return null
+  return slices.value.find((s) => s.ref_id === activeStripSliceId.value) ?? null
+})
+
+const showThinkBody = computed(() => {
+  if (props.msg.isThinking) return true
+  if (props.msg.thinkCollapsed && !thinkExpanded.value) return false
+  return !!(props.msg.thinkContent || '').trim()
+})
+
+const thinkPanelSummary = computed(() => {
+  const raw = String(props.msg.thinkContent || '').trim()
+  if (!raw) return '思考中…'
+  const oneLine = raw.replace(/\s+/g, ' ').slice(0, 72)
+  return oneLine.length < raw.length ? `${oneLine}…` : oneLine
+})
+
 const annotations = computed(() => ragCitationAnnotationsForMsg(props.msg))
 
 const messageScope = computed(() => String(props.msg.messageId ?? props.contextId ?? 'draft'))
 
-// 流式结束后一次性解析引用，避免 computed 内重复 hydrate
+// 流式期间收到 citations 时也解析切片，便于检索后立即展示
 watch(
-  () => [props.msg.messageId, props.msg.isStreaming] as const,
+  () => [props.msg.messageId, props.msg.isStreaming, props.msg.ragPrefetchSlices?.length ?? 0] as const,
   () => {
-    if (!props.msg.isStreaming) hydrateMsgCitations(props.msg)
+    if ((props.msg.ragPrefetchSlices?.length ?? 0) > 0) {
+      hydrateMsgCitations(props.msg)
+    } else if (!props.msg.isStreaming) {
+      hydrateMsgCitations(props.msg)
+    }
   },
   { immediate: true },
 )
+
+watch(
+  () => slices.value.length,
+  (n, prev) => {
+    // 流式期间只展示横条，不自动展开明细；历史消息可默认展开
+    if (n > 0 && prev === 0 && !props.msg.isStreaming) {
+      slicesOpen.value = true
+    }
+  },
+)
+
+const showPhaseStatus = computed(() => {
+  if (!props.msg.isStreaming || !props.msg.phaseStatus) return false
+  // 已有知识库横条时不再重复阶段条
+  if (slices.value.length > 0) return false
+  // 思考过程由独立面板展示
+  if (props.msg.isThinking || props.msg.thinkContent) return false
+  // 正文已开始则隐藏
+  if ((props.msg.content || '').trim()) return false
+  return true
+})
+
+const hasAnswerBody = computed(() => {
+  const raw = answerBodyForMsg(props.msg)
+  return !!raw
+})
+
+const thinkHtml = computed(() => {
+  const raw = String(props.msg.thinkContent || '')
+  if (!raw) return ''
+  return renderStreamingText(raw, { messageScope: messageScope.value })
+})
 
 const bodyHtml = computed(() => {
   const raw = answerBodyForMsg(props.msg)
@@ -90,6 +169,22 @@ const isSliceDetailOpen = (refId: number): boolean => sliceDetailOpen.value[refI
 
 const toggleSliceDetail = (refId: number, open?: boolean): void => {
   sliceDetailOpen.value[refId] = open ?? !isSliceDetailOpen(refId)
+}
+
+/** 点击横条芯片：展开/收起对应切片正文 */
+const onStripChipClick = (refId: number): void => {
+  if (activeStripSliceId.value === refId) {
+    activeStripSliceId.value = null
+    sliceDetailOpen.value[refId] = false
+    return
+  }
+  activeStripSliceId.value = refId
+  sliceDetailOpen.value = { [refId]: true }
+}
+
+const toggleThinkExpand = (): void => {
+  if (props.msg.isThinking) return
+  thinkExpanded.value = !thinkExpanded.value
 }
 
 const onCitationClick = (e: MouseEvent): void => {
@@ -397,6 +492,16 @@ const applyCustomIntent = (): void => {
   selectedLabel.value = t
   void submitIntentFeedback(true)
 }
+
+const onRegenerate = (): void => {
+  const q = (props.userQuestion || '').trim()
+  if (q) emit('regenerate', q)
+}
+
+const scrollToFeedback = (): void => {
+  const el = document.querySelector('.msg-feedback-card')
+  el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
 </script>
 
 <template>
@@ -416,15 +521,62 @@ const applyCustomIntent = (): void => {
         <span v-if="answerTime && !msg.isStreaming" class="msg-meta-time">回答时间 {{ answerTime }}</span>
       </div>
 
-      <div
-        v-if="msg.content || msg.isStreaming"
-        class="chat-prose"
-        :class="{ 'is-streaming': msg.isStreaming }"
-        v-html="bodyHtml"
-        @click="onCitationClick"
-      />
+      <div v-if="showPhaseStatus" class="phase-status-bar">
+        <span class="phase-status-dot" />
+        {{ msg.phaseStatus }}
+      </div>
 
-      <div v-if="!msg.isStreaming && slices.length" class="msg-rag-cite-wrap">
+      <div v-if="slices.length" class="msg-rag-strip-wrap">
+        <div class="rag-strip-head">
+          <span class="rag-strip-title">知识库检索 · {{ slices.length }} 条</span>
+          <button type="button" class="rag-cite-bar-action rag-cite-bar-action--text" @click="toggleSlices">
+            {{ slicesOpen ? '收起明细 ▲' : '展开明细 ▼' }}
+          </button>
+        </div>
+        <div class="rag-strip-scroll" role="list">
+          <button
+            v-for="sl in slices"
+            :key="'strip-' + sl.ref_id + '-' + (sl.source_file || sl.parent_name)"
+            type="button"
+            class="rag-strip-chip"
+            :class="{ 'rag-strip-chip--active': activeStripSliceId === sl.ref_id }"
+            @click="onStripChipClick(sl.ref_id)"
+          >
+            <span class="rag-ref-tag">[{{ sl.ref_id }}]</span>
+            <span class="rag-strip-chip-name">{{ sl.parent_name }}</span>
+            <span v-if="sl.score != null" class="rag-strip-chip-score">{{ Number(sl.score).toFixed(2) }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="activeStripSlice"
+        :id="citeSliceId(activeStripSlice.ref_id)"
+        class="rag-strip-inline-detail"
+      >
+        <div class="rag-strip-inline-head">
+          <span class="rag-strip-inline-title">
+            <span class="rag-ref-tag">[{{ activeStripSlice.ref_id }}]</span>
+            {{ activeStripSlice.parent_name }}
+          </span>
+          <button type="button" class="rag-cite-bar-action rag-cite-bar-action--text" @click="activeStripSliceId = null">
+            收起 ▲
+          </button>
+        </div>
+        <div v-if="activeStripSlice.source_file" class="rag-cite-meta web-search-url">
+          父文档路径：{{ activeStripSlice.source_file }}
+        </div>
+        <div
+          class="rag-cite-body rag-cite-body--rich"
+          v-html="getSliceHtml(activeStripSlice.ref_id, activeStripSlice.slice_content)"
+          @click="onSliceContentClick"
+        />
+        <span v-if="activeStripSlice.score != null" class="rag-cite-score">
+          score {{ Number(activeStripSlice.score).toFixed(4) }}
+        </span>
+      </div>
+
+      <div v-if="slices.length && slicesOpen" class="msg-rag-cite-wrap">
         <div class="rag-cite-panel-flat">
           <div class="rag-cite-bar rag-cite-bar--panel rag-cite-bar--flat">
             <span class="rag-cite-bar-title">文献切片明细 · {{ slices.length }} 条</span>
@@ -432,7 +584,7 @@ const applyCustomIntent = (): void => {
               {{ slicesOpen ? '收起 ▲' : '展开 ▼' }}
             </button>
           </div>
-          <ol v-if="slicesOpen" class="web-search-list rag-cite-list">
+          <ol class="web-search-list rag-cite-list">
             <li
               v-for="sl in slices"
               :key="'cite-s-' + sl.ref_id + '-' + (sl.source_file || sl.parent_name)"
@@ -468,6 +620,54 @@ const applyCustomIntent = (): void => {
           </ol>
         </div>
       </div>
+
+      <div
+        v-if="msg.thinkContent || msg.isThinking"
+        class="think-panel"
+        :class="{
+          'think-panel--collapsed': msg.thinkCollapsed && !thinkExpanded && !msg.isThinking,
+          'think-panel--streaming': msg.isThinking,
+        }"
+      >
+        <button type="button" class="think-panel-head" @click="toggleThinkExpand">
+          <span class="think-panel-title">
+            <span class="think-panel-icon">💭</span>
+            {{ msg.isThinking ? '深度思考中' : '已深度思考' }}
+          </span>
+          <span v-if="msg.isThinking" class="think-panel-live">思考中…</span>
+          <span v-else-if="msg.thinkCollapsed && !thinkExpanded" class="think-panel-hint">点击展开</span>
+          <span v-else-if="msg.thinkCollapsed && thinkExpanded" class="think-panel-hint">点击收起</span>
+        </button>
+        <p
+          v-if="msg.thinkCollapsed && !thinkExpanded && !msg.isThinking"
+          class="think-panel-summary"
+        >
+          {{ thinkPanelSummary }}
+        </p>
+        <div
+          v-show="showThinkBody"
+          class="think-panel-body chat-prose"
+          :class="{ 'is-streaming': msg.isThinking }"
+          v-html="thinkHtml"
+        />
+      </div>
+
+      <div
+        v-if="hasAnswerBody"
+        class="chat-prose answer-body"
+        :class="{ 'is-streaming': msg.isStreaming && !msg.isThinking, 'chat-prose--collapsed': shouldCollapse }"
+        v-html="bodyHtml"
+        @click="onCitationClick"
+      />
+      <button
+        v-if="isLongContent && !msg.isStreaming && hasAnswerBody"
+        type="button"
+        class="content-expand-btn"
+        @click="toggleContentExpand"
+      >
+        <span v-if="!contentExpanded">📄 展开全文 ▼</span>
+        <span v-else>▲ 收起</span>
+      </button>
 
       <div v-if="!msg.isStreaming && annotations.length" class="msg-rag-cite-wrap">
         <div class="rag-cite-panel-flat">
@@ -508,9 +708,30 @@ const applyCustomIntent = (): void => {
           </button>
         </div>
       </div>
+
+      <div v-if="!msg.isStreaming && msg.streamInterrupted" class="stream-interrupt-card">
+        <p class="stream-interrupt-text">该次会话 AI 回答被中断，请检查网络状态！</p>
+        <div class="stream-interrupt-actions">
+          <button type="button" class="stream-interrupt-btn stream-interrupt-btn--primary" @click="onRegenerate">
+            ↻ 重新生成
+          </button>
+          <button
+            v-if="msg.messageId"
+            type="button"
+            class="stream-interrupt-btn"
+            @click="scrollToFeedback"
+          >
+            💡 问题反馈
+          </button>
+        </div>
+      </div>
     </div>
 
-    <div v-if="!msg.isStreaming && msg.messageId" class="msg-feedback-card">
+    <div v-if="!msg.isStreaming && (msg.messageId || msg.streamInterrupted)" class="msg-feedback-card">
+      <div v-if="!msg.messageId && msg.streamInterrupted" class="satisfaction-block">
+        <p class="satisfaction-title text-[#64748b]">回答尚未完整落库，请稍后刷新或点击「重新生成」。</p>
+      </div>
+      <template v-else>
       <div v-if="msg.intent || msg.intentLabel" class="intent-feedback-row">
         <div class="intent-feedback-head">
           <span v-if="msg.intent || msg.intentLabel" class="intent-label">意图识别：{{ intentText }}</span>
@@ -649,6 +870,7 @@ const applyCustomIntent = (): void => {
           </button>
         </template>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -732,6 +954,42 @@ const applyCustomIntent = (): void => {
 }
 .follow-up-chip:hover {
   background: rgba(37, 99, 235, 0.08);
+}
+.stream-interrupt-card {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.stream-interrupt-text {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #dc2626;
+  line-height: 1.5;
+}
+.stream-interrupt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stream-interrupt-btn {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(54, 62, 66, 0.2);
+  background: #fff;
+  cursor: pointer;
+}
+.stream-interrupt-btn--primary {
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.35);
+  background: rgba(217, 119, 6, 0.08);
+}
+.stream-interrupt-btn:hover {
+  opacity: 0.9;
 }
 .intent-feedback-row {
   margin-bottom: 12px;
@@ -947,5 +1205,40 @@ const applyCustomIntent = (): void => {
   background: #15803d;
   opacity: 1;
   cursor: default;
+}
+
+/* 长消息展开/收起 */
+.chat-prose--collapsed {
+  position: relative;
+  max-height: 320px;
+  overflow: hidden;
+}
+.chat-prose--collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: linear-gradient(to bottom, transparent, #ffffff);
+  pointer-events: none;
+}
+.content-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.content-expand-btn:hover {
+  background: rgba(37, 99, 235, 0.12);
 }
 </style>
