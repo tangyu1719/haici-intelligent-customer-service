@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # 模型上下文窗口（字符级预算，可按接入点 max_tokens 换算调整）
     CHAT_MAX_CONTEXT_CHARS: int = int(os.getenv("CHAT_MAX_CONTEXT_CHARS", str(256 * 1024)))
     CHAT_CONTEXT_RESERVE_CHARS: int = int(os.getenv("CHAT_CONTEXT_RESERVE_CHARS", "32768"))
-    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "4"))
+    RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
     RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.35"))
     CHAT_HISTORY_TURNS: int = int(os.getenv("CHAT_HISTORY_TURNS", "50"))
 
@@ -87,6 +87,9 @@ class Settings(BaseSettings):
     KB_NORMALIZE_ENABLED: bool = os.getenv("KB_NORMALIZE_ENABLED", "true").lower() in ("1", "true", "yes")
     # 图片 OCR/VLM 并行（API 调用为主，适度并发可显著缩短标准化耗时）
     IMAGE_PROCESS_PARALLEL: bool = os.getenv("IMAGE_PROCESS_PARALLEL", "true").lower() in ("1", "true", "yes")
+    # ── Ollama 本地模型(用于意图识别/Query 改写加速) ──
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2:0.5b")
     IMAGE_PROCESS_WORKERS: int = int(os.getenv("IMAGE_PROCESS_WORKERS", "4"))
     # 默认关闭类型分类 VLM，每张图少一次网关调用（UI 手册场景收益大）
     IMAGE_CLASSIFY_ENABLED: bool = os.getenv("IMAGE_CLASSIFY_ENABLED", "false").lower() in ("1", "true", "yes")
