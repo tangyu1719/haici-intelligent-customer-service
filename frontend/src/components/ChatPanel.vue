@@ -321,10 +321,21 @@ const archiveSession = async (id: number, e: Event): Promise<void> => {
   }
 }
 
+const showScrollBtn = ref(false)
+
+const onChatScroll = (): void => {
+  const container = document.getElementById('chatContainer')
+  if (!container) return
+  showScrollBtn.value = container.scrollHeight - container.scrollTop - container.clientHeight > 120
+}
+
 const scrollToBottom = async (): Promise<void> => {
   await nextTick()
   const container = document.getElementById('chatContainer')
-  if (container) container.scrollTop = container.scrollHeight
+  if (container) {
+    container.scrollTop = container.scrollHeight
+    showScrollBtn.value = false
+  }
 }
 
 const adjustTextareaHeight = (e: Event): void => {
@@ -498,6 +509,10 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
         if (!dataLine) continue
         const data = JSON.parse(dataLine)
         const bot = ensureAssistant()
+        if (event === 'status') {
+          // 临时状态提示，不混入正文
+          bot.content = data.text || ''
+        }
         if (event === 'meta') {
           bot.intent = data.intent
           bot.intentLabel = data.intent_label || data.intent
@@ -505,6 +520,14 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           bot.llmNodeName = data.llm_node_name
           bot.llmModel = data.llm_model
           if (data.pipeline) bot.pipeline = data.pipeline
+        }
+        if (event === 'token') {
+          // 收到第一个真实token时清除状态提示
+          if (bot.content && (bot.content.startsWith('正在') || bot.content === '')) {
+            bot.content = ''
+          }
+          bot.content += data.content || ''
+          scrollToBottom()
         }
         if (event === 'citations') {
           bot.ragPrefetchSlices = data.slices || data.items || []
@@ -699,7 +722,7 @@ onMounted(async () => {
             </div>
           </div>
         </div>
-        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll min-h-0">
+        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll min-h-0 relative" @scroll="onChatScroll">
           <div v-if="messages.length === 0 && !isWaiting" class="h-full flex flex-col items-center justify-center text-[#363e42]/30">
             <p class="font-black tracking-widest uppercase text-xs text-[#363e42]">智能客服 Agent 已就绪</p>
             <p class="text-[11px] font-medium mt-2 opacity-50">基于 RAG 知识库问答，支持流式输出与引用溯源</p>

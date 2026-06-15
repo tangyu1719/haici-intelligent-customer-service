@@ -1,23 +1,14 @@
 import hashlib
-
 import json
-
 import logging
-
+import os
 from collections.abc import AsyncIterator
-
 from typing import Dict, Optional
-
-
 
 import httpx
 
-
-
 from app.config import settings
-
 from app.embedding_loader import load_embedder
-
 from app.services.llm_gateway import GatewayNode, get_llm_gateway
 
 

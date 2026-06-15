@@ -30,11 +30,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["对话"])
 
-CHITCHAT_SYSTEM = (
-    "你是 HaiCi 企业智能客服助手。用简洁中文回答用户。"
-    "可介绍自己的身份与能力（产品咨询、售后政策、知识库问答）。"
-    "不要编造具体产品参数或政策细节；不确定时建议用户换种问法或联系人工客服。"
-)
+from app.services.prompt_segments import build_chitchat_system_prompt
+
+CHITCHAT_SYSTEM = build_chitchat_system_prompt()
 
 
 def _sse(event: str, data: dict) -> str:
@@ -167,6 +165,8 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
         persist_tasks: list[asyncio.Task] = []
         trace_id = set_agent_trace(user_id=user_id)
         set_agent_chain("chat/stream")
+        # 立即返回状态，让用户知道系统在处理
+        yield _sse("status", {"text": "正在理解..."})
         try:
             sess = stream_db.get(ChatSession, session_id_val)
             if not sess or sess.user_id != user_id:
@@ -242,6 +242,10 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 except Exception:
                     pass
             anti_dilution_summary: str | None = None
+
+            # 告知前端当前阶段
+            if pipeline.intent != "chitchat" and not pipeline.faq_answer:
+                yield _sse("status", {"text": "正在检索知识库..."})
 
             docs = []
             if pipeline.intent != "chitchat" and not pipeline.faq_answer:

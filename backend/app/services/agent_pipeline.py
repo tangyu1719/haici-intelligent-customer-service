@@ -54,28 +54,25 @@ def _rule_rewrite(query: str, history: list[dict]) -> str:
 def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
     from app.llms import get_pipeline_llm
 
-    # 优先用 Ollama 本地小模型(快)，否则走主网关
+    # 优先用 Ollama(10s超时，失败自动降级)，否则走主网关
     pipeline_node = get_pipeline_llm()
     if pipeline_node:
-        return _call_llm_with_node(pipeline_node, query, history)
-
+        try:
+            result = _call_llm_with_node(pipeline_node, query, history, timeout=8.0)
+            if result:
+                return result
+        except Exception:
+            logger.warning("[AI问答-Pipeline|Ollama|超时/失败|降级至网关]")
     return _call_llm_default(query, history)
 
 
-def _call_llm_with_node(node, query: str, history: list[dict]) -> dict | None:
-    """用指定网关节点调用 LLM"""
+def _call_llm_with_node(node, query: str, history: list[dict], timeout: float = 10.0) -> dict | None:
+    """用指定网关节点调用 LLM（短超时，失败自动降级）"""
     import httpx
 
     hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
-    prompt = (
-        "你是企业智能客服的查询预处理模块。根据用户问题输出 JSON，字段：\n"
-        'intent 取值 product_consult|after_sale|chitchat|complaint；'
-        "rewritten_query 为利于知识库检索的改写问句；"
-        "query_keywords 为原问实体/关键词数组；"
-        "retrieval_terms 为映射后的内部业务检索词数组。\n"
-        "只输出 JSON，不要解释。\n"
-        f"历史:\n{hist or '无'}\n\n问题:{query}"
-    )
+    from app.services.prompt_segments import build_preprocess_prompt
+    prompt = build_preprocess_prompt(hist, query)
     url = node.base_url.rstrip("/") + "/chat/completions"
     payload = {
         "model": node.model,
@@ -88,7 +85,7 @@ def _call_llm_with_node(node, query: str, history: list[dict]) -> dict | None:
         resp = httpx.post(url, json=payload, headers={
             "Authorization": f"Bearer {node.api_key}",
             "Content-Type": "application/json",
-        }, timeout=15.0)
+        }, timeout=timeout)
         if resp.status_code == 200:
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
@@ -108,15 +105,8 @@ def _call_llm_default(query: str, history: list[dict]) -> dict | None:
     """通过主网关调用 LLM"""
     llm = get_llm()
     hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
-    prompt = (
-        "你是企业智能客服的查询预处理模块。根据用户问题输出 JSON，字段：\n"
-        'intent 取值 product_consult|after_sale|chitchat|complaint；'
-        "rewritten_query 为利于知识库检索的改写问句；"
-        "query_keywords 为原问实体/关键词数组；"
-        "retrieval_terms 为映射后的内部业务检索词数组。\n"
-        "只输出 JSON，不要解释。\n"
-        f"历史:\n{hist or '无'}\n\n问题:{query}"
-    )
+    from app.services.prompt_segments import build_preprocess_prompt
+    prompt = build_preprocess_prompt(hist, query)
     try:
         raw = llm.call(prompt, temperature=0.1, max_tokens=512)
         m = _JSON_RE.search(raw)
