@@ -29,6 +29,7 @@ INTENT_LABELS = {
     "after_sale": "售后问题",
     "chitchat": "闲聊",
     "complaint": "投诉",
+    "faq_cached": "FAQ 缓存",
 }
 
 
