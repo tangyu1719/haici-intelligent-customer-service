@@ -187,7 +187,11 @@ def list_sessions(
         .outerjoin(User, User.id == ChatSession.user_id)
     )
     if view_all:
-        q = q.filter(ChatSession.status == 1)
+        q = q.filter(
+            ChatSession.status == 1,
+            ChatSession.user_deleted == 0,
+            ChatSession.user_deleted_at.is_(None),
+        )
         if user_id is not None:
             q = q.filter(ChatSession.user_id == user_id)
     else:
