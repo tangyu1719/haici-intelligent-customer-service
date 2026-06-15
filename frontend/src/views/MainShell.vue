@@ -2,17 +2,20 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, loadAuthFromStorage } from '../api/auth'
-import type { ChatSessionItem, KnowledgeBaseBrief, KnowledgeDoc, LlmGatewaySnapshot } from '../types'
+import type { KnowledgeBaseBrief, KnowledgeDoc } from '../types'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
 import GatewayPanel from '../components/GatewayPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
 import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
+import AdminUsersPanel from '../components/AdminUsersPanel.vue'
 import ListPagination from '../components/ListPagination.vue'
 import ListQueryBar from '../components/ListQueryBar.vue'
 import MultimodalPanel from '../components/MultimodalPanel.vue'
 import StructuredPanel from '../components/StructuredPanel.vue'
+import RbacAdminPanel from '../components/RbacAdminPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
+import SessionHistoryPanel from '../components/SessionHistoryPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 import { fixDisplayFilename } from '../utils/filename'
 
@@ -41,32 +44,12 @@ const selectedKbId = ref<number | null>(null)
 const kbCreating = ref(false)
 const kbCreateName = ref('')
 const kbCreateDesc = ref('')
-const sessionList = ref<ChatSessionItem[]>([])
-const sessionTotal = ref(0)
-const sessionQuery = ref<ListQueryState>(defaultListQuery(20))
-const msgQuery = ref<ListQueryState>({ ...defaultListQuery(30), sortBy: 'created_at', sortOrder: 'asc' })
-const sessionMessages = ref<{ id: number; role: string; content: string; intent_label?: string; created_at: string }[]>([])
-const msgTotal = ref(0)
-const selectedSessionId = ref<number | null>(null)
-const sessionDetail = ref<{
-  id: number
-  context_id: string
-  title: string
-  message_count: number
-  created_at: string
-  updated_at: string
-  messages: { id: number; role: string; content: string; intent_label?: string; created_at: string }[]
-} | null>(null)
-const editingSessionId = ref<number | null>(null)
-const editingSessionTitle = ref('')
-const editingSessionNote = ref('')
 const adminLogRows = ref<Record<string, unknown>[]>([])
 const adminLogTotal = ref(0)
 const adminLogPage = ref(1)
 const adminLogSize = ref(20)
 const logQuery = ref<ListQueryState>(defaultListQuery(20))
 const logModuleFilter = ref('')
-const llmGateway = ref<LlmGatewaySnapshot | null>(null)
 const profileNickname = ref('')
 const profilePhone = ref('')
 const profilePhoneCode = ref('')
@@ -74,6 +57,16 @@ const profileMsg = ref('')
 
 const activePath = computed(() => route.path)
 const expandedMenuIds = ref<Set<number>>(new Set())
+
+const PROFILE_MENU_ID = 20
+
+const primaryMenus = computed(() =>
+  menus.value.filter((m) => m.id !== PROFILE_MENU_ID && m.name !== '个人中心'),
+)
+
+const profileMenu = computed(() =>
+  menus.value.find((m) => m.id === PROFILE_MENU_ID || m.name === '个人中心') ?? null,
+)
 
 const syncExpandedMenus = (): void => {
   const next = new Set<number>()
@@ -115,7 +108,9 @@ const pageTitle = computed(() => {
     '/admin/eval': 'EVAL 评测',
     '/admin/agent-config': 'Agent 配置',
     '/admin/agent-gateway': 'Agent 网关',
+    '/admin/rbac': '用户权限',
     '/admin/feedback': '用户反馈',
+    '/admin/users': '用户权限',
   }
   return map[route.path] || 'HaiCi 智能客服'
 })
@@ -128,7 +123,6 @@ const adminLogKind = computed(() => {
   return ''
 })
 
-const visibleMenus = computed(() => menus.value)
 const hideGlobalHeader = computed(() => route.path === '/chat')
 
 const loadMenus = async (): Promise<void> => {
@@ -235,85 +229,6 @@ const fmtDateTime = (s?: string): string => {
     hour: '2-digit',
     minute: '2-digit',
   })
-}
-
-const loadSessions = async (): Promise<void> => {
-  if (!hasPerm('session:view')) return
-  const qs = toSearchParams(sessionQuery.value)
-  const res = await fetch(`/api/v1/sessions?${qs}`, { headers: authHeaders() })
-  if (res.ok) {
-    const data = await res.json()
-    sessionList.value = data.items || []
-    sessionTotal.value = data.total || 0
-    if (data.page) sessionQuery.value.page = data.page
-    if (data.size) sessionQuery.value.size = data.size
-  }
-}
-
-const resetSessionQuery = (): void => {
-  sessionQuery.value = defaultListQuery(20)
-  loadSessions()
-}
-
-const loadSessionMessages = async (sessionId: number): Promise<void> => {
-  const qs = toSearchParams(msgQuery.value)
-  const res = await fetch(`/api/v1/sessions/${sessionId}/messages?${qs}`, { headers: authHeaders() })
-  if (res.ok) {
-    const data = await res.json()
-    sessionMessages.value = data.items || []
-    msgTotal.value = data.total || 0
-    if (data.page) msgQuery.value.page = data.page
-    if (data.size) msgQuery.value.size = data.size
-  }
-}
-
-const openSessionDetail = async (id: number): Promise<void> => {
-  selectedSessionId.value = id
-  editingSessionId.value = null
-  msgQuery.value.page = 1
-  const res = await fetch(`/api/v1/sessions/${id}`, { headers: authHeaders() })
-  if (res.ok) {
-    sessionDetail.value = await res.json()
-    await loadSessionMessages(id)
-  }
-}
-
-const startEditSessionRow = (s: ChatSessionItem, e?: Event): void => {
-  e?.stopPropagation()
-  editingSessionId.value = s.id
-  editingSessionTitle.value = s.title || ''
-  editingSessionNote.value = s.meta?.note || ''
-}
-
-const cancelEditSessionRow = (): void => {
-  editingSessionId.value = null
-  editingSessionTitle.value = ''
-  editingSessionNote.value = ''
-}
-
-const saveEditSessionRow = async (id: number): Promise<void> => {
-  const title = editingSessionTitle.value.trim()
-  if (!title) return
-  const res = await fetch(`/api/v1/sessions/${id}`, {
-    method: 'PATCH',
-    headers: authHeaders(),
-    body: JSON.stringify({ title, note: editingSessionNote.value.trim() || '' }),
-  })
-  if (!res.ok) return
-  cancelEditSessionRow()
-  await loadSessions()
-  if (selectedSessionId.value === id) await openSessionDetail(id)
-}
-
-const archiveSessionRow = async (id: number, e?: Event): Promise<void> => {
-  e?.stopPropagation()
-  if (!window.confirm('确定归档该会话？')) return
-  await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
-  if (selectedSessionId.value === id) {
-    selectedSessionId.value = null
-    sessionDetail.value = null
-  }
-  await loadSessions()
 }
 
 const loadAdminLogs = async (): Promise<void> => {
@@ -458,12 +373,6 @@ watch(
       await loadKbList()
       await loadKnowledge()
     }
-    if (p === '/sessions') {
-      selectedSessionId.value = null
-      sessionDetail.value = null
-      sessionMessages.value = []
-      await loadSessions()
-    }
     if (p === '/profile') await loadMe()
     if (p === '/profile/feedback') { /* ProfileFeedbackPanel 自加载 */ }
     if (p.startsWith('/admin/logs/')) {
@@ -478,14 +387,6 @@ watch(() => [kbQuery.value.page, kbQuery.value.size], () => {
   if (route.path === '/knowledge') loadKnowledge()
 })
 
-watch(() => [sessionQuery.value.page, sessionQuery.value.size], () => {
-  if (route.path === '/sessions') loadSessions()
-})
-
-watch(() => [msgQuery.value.page, msgQuery.value.size], () => {
-  if (selectedSessionId.value) loadSessionMessages(selectedSessionId.value)
-})
-
 watch(() => [adminLogPage.value, adminLogSize.value], () => {
   if (route.path.startsWith('/admin/logs/')) loadAdminLogs()
 })
@@ -498,12 +399,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex h-full w-full bg-white rounded-[24px] border border-[#363e42]/5 shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden relative">
+  <div class="shell-root flex h-full w-full bg-[#f1f5f9] rounded-[24px] border border-[#cbd5e1]/80 shadow-[0_8px_30px_rgb(0,0,0,0.06)] overflow-hidden relative">
     <aside
       :class="isSidebarOpen ? 'w-[200px]' : 'w-[72px]'"
-      class="h-full bg-white border-r border-[#363e42]/5 flex flex-col z-40 shrink-0 transition-all duration-300"
+      class="shell-sidebar h-full flex flex-col z-40 shrink-0 transition-all duration-300"
     >
-      <div class="h-16 flex items-center border-b border-[#363e42]/5 px-4" :class="isSidebarOpen ? '' : 'justify-center'">
+      <div class="shell-sidebar-brand h-16 flex items-center px-4" :class="isSidebarOpen ? '' : 'justify-center'">
         <div class="w-8 h-8 bg-gradient-to-br from-[#363e42] to-[#1a1c1d] text-white rounded-[10px] flex items-center justify-center shrink-0">
           <span class="text-xs font-bold text-[#d97706]">HC</span>
         </div>
@@ -513,60 +414,108 @@ onMounted(async () => {
         </div>
       </div>
 
-      <nav class="py-4 flex-1 bg-[#fcfcfc] overflow-y-auto px-3 flex flex-col gap-1">
-        <template v-for="node in visibleMenus" :key="node.id">
-          <div v-if="node.menu_type === 'M' && node.children?.length" class="flex flex-col gap-0.5">
-            <button
-              type="button"
-              class="w-full flex items-center justify-between py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
-              :class="isChildMenuActive(node) ? 'bg-[#363e42]/10 text-[#363e42]' : 'text-[#363e42] hover:bg-[#363e42]/5'"
-              @click="isSidebarOpen ? toggleMenuGroup(node.id) : undefined"
+      <div class="shell-sidebar-middle flex-1 flex flex-col min-h-0 relative">
+        <nav class="shell-sidebar-nav py-4 flex-1 overflow-y-auto px-3 flex flex-col gap-1 min-h-0">
+          <template v-for="node in primaryMenus" :key="node.id">
+            <div v-if="node.menu_type === 'M' && node.children?.length" class="flex flex-col gap-0.5">
+              <button
+                type="button"
+                class="w-full flex items-center justify-between py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
+                :class="isChildMenuActive(node) ? 'bg-[#363e42]/10 text-[#363e42]' : 'text-[#363e42] hover:bg-[#363e42]/5'"
+                @click="isSidebarOpen ? toggleMenuGroup(node.id) : undefined"
+              >
+                <span v-if="isSidebarOpen">{{ node.name }}</span>
+                <span v-else class="w-full text-center text-[10px]">{{ node.name.slice(0, 2) }}</span>
+                <i
+                  v-if="isSidebarOpen"
+                  class="fas text-[10px] text-[#363e42]/40"
+                  :class="expandedMenuIds.has(node.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
+                ></i>
+              </button>
+              <div
+                v-if="isSidebarOpen && expandedMenuIds.has(node.id)"
+                class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
+              >
+                <router-link
+                  v-for="child in node.children.filter((c) => c.menu_type === 'C' && c.path)"
+                  :key="child.id"
+                  :to="child.path || '/'"
+                  class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
+                  :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
+                >
+                  {{ child.name }}
+                </router-link>
+              </div>
+            </div>
+            <router-link
+              v-else-if="node.menu_type === 'C' && node.path"
+              :to="node.path || '/'"
+              class="w-full flex items-center py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
+              :class="activePath === node.path ? 'bg-[#363e42] text-white' : 'text-[#363e42] hover:bg-[#363e42]/5'"
             >
               <span v-if="isSidebarOpen">{{ node.name }}</span>
               <span v-else class="w-full text-center text-[10px]">{{ node.name.slice(0, 2) }}</span>
-              <i
-                v-if="isSidebarOpen"
-                class="fas text-[10px] text-[#363e42]/40"
-                :class="expandedMenuIds.has(node.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
-              ></i>
-            </button>
-            <div
-              v-if="isSidebarOpen && expandedMenuIds.has(node.id)"
-              class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
-            >
-              <router-link
-                v-for="child in node.children.filter((c) => c.menu_type === 'C' && c.path)"
-                :key="child.id"
-                :to="child.path || '/'"
-                class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
-                :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
+            </router-link>
+          </template>
+        </nav>
+        <button
+          type="button"
+          class="shell-sidebar-toggle"
+          :title="isSidebarOpen ? '收起侧栏' : '展开侧栏'"
+          @click="isSidebarOpen = !isSidebarOpen"
+        >
+          <i class="fas text-[11px]" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+        </button>
+      </div>
+
+      <div class="shell-sidebar-footer p-3 shrink-0">
+        <div class="shell-footer-top-row">
+          <div v-if="profileMenu" class="shell-profile-menu">
+            <div v-if="profileMenu.menu_type === 'M' && profileMenu.children?.length" class="flex flex-col gap-0.5">
+              <button
+                type="button"
+                class="shell-profile-btn w-full flex items-center justify-between py-2 px-2 rounded-xl text-[12px] font-bold transition-all"
+                :class="isChildMenuActive(profileMenu) ? 'bg-[#363e42]/10 text-[#363e42]' : 'text-[#363e42] hover:bg-[#363e42]/5'"
+                @click="isSidebarOpen ? toggleMenuGroup(profileMenu.id) : router.push('/profile')"
               >
-                {{ child.name }}
-              </router-link>
+                <span v-if="isSidebarOpen">{{ profileMenu.name }}</span>
+                <span v-else class="w-full text-center text-[10px]">个人</span>
+                <i
+                  v-if="isSidebarOpen"
+                  class="fas text-[10px] text-[#363e42]/40"
+                  :class="expandedMenuIds.has(profileMenu.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
+                ></i>
+              </button>
+              <div
+                v-if="isSidebarOpen && expandedMenuIds.has(profileMenu.id)"
+                class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
+              >
+                <router-link
+                  v-for="child in profileMenu.children.filter((c) => c.menu_type === 'C' && c.path)"
+                  :key="child.id"
+                  :to="child.path || '/'"
+                  class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
+                  :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
+                >
+                  {{ child.name }}
+                </router-link>
+              </div>
             </div>
           </div>
-          <router-link
-            v-else-if="node.menu_type === 'C' && node.path"
-            :to="node.path || '/'"
-            class="w-full flex items-center py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
-            :class="activePath === node.path ? 'bg-[#363e42] text-white' : 'text-[#363e42] hover:bg-[#363e42]/5'"
+          <button
+            type="button"
+            class="shell-logout-btn text-[11px] text-red-500 font-bold shrink-0"
+            @click="logout"
           >
-            <span v-if="isSidebarOpen">{{ node.name }}</span>
-            <span v-else class="w-full text-center text-[10px]">{{ node.name.slice(0, 2) }}</span>
-          </router-link>
-        </template>
-      </nav>
-
-      <div class="p-3 border-t border-[#363e42]/5 flex flex-col gap-2">
-        <button class="text-[11px] text-red-500 font-bold" @click="logout">退出登录</button>
-        <button class="w-8 h-8 mx-auto flex items-center justify-center rounded-lg text-[#363e42]/40 hover:bg-[#363e42]/10" @click="isSidebarOpen = !isSidebarOpen">
-          <i class="fas text-[12px]" :class="isSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
-        </button>
+            <span v-if="isSidebarOpen">退出登录</span>
+            <span v-else class="text-[10px]">退</span>
+          </button>
+        </div>
       </div>
     </aside>
 
-    <main class="flex-1 flex flex-col h-full bg-[#fdf6e3]/30 relative">
-      <header v-if="!hideGlobalHeader" class="h-16 border-b border-[#363e42]/5 bg-white/80 backdrop-blur-md flex items-center justify-between px-6 shrink-0">
+    <main class="shell-main flex-1 flex flex-col h-full relative min-w-0">
+      <header v-if="!hideGlobalHeader" class="shell-main-header h-16 flex items-center justify-between px-6 shrink-0">
         <span class="text-[14px] font-black text-[#363e42]">{{ pageTitle }}</span>
         <div v-if="llmGateway?.active_chat?.name" class="text-right hidden sm:block">
           <div class="text-[11px] font-bold text-[#363e42]">{{ providerLabel(llmGateway.active_chat.provider) }} · {{ llmGateway.active_chat.name }}</div>
@@ -735,115 +684,11 @@ onMounted(async () => {
         </div>
       </div>
 
-<div v-else-if="route.path === '/sessions'" class="flex-1 p-6 overflow-y-auto">
-        <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <div class="lg:col-span-3 bg-white rounded-2xl border overflow-hidden">
-            <ListQueryBar
-              v-model="sessionQuery"
-              :sort-options="[
-                { value: 'updated_at', label: '最后更新' },
-                { value: 'created_at', label: '创建时间' },
-                { value: 'title', label: '会话名称' },
-                { value: 'id', label: '会话 ID' },
-              ]"
-              name-placeholder="会话标题"
-              keyword-placeholder="标题/会话名称"
-              @search="loadSessions"
-              @reset="resetSessionQuery"
-            />
-            <table class="w-full text-sm">
-              <thead class="bg-[#fcfcfc] text-[#363e42]/60 text-[11px]">
-                <tr>
-                  <th class="p-3 text-left">ID</th>
-                  <th class="p-3 text-left">追踪 ID</th>
-                  <th class="p-3 text-left">名称</th>
-                  <th class="p-3 text-left">创建时间</th>
-                  <th class="p-3 text-left">最后更新</th>
-                  <th class="p-3 text-left">消息</th>
-                  <th class="p-3 text-left">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="s in sessionList"
-                  :key="s.id"
-                  class="border-t cursor-pointer hover:bg-[#fdf6e3]/30"
-                  :class="selectedSessionId === s.id ? 'bg-[#d97706]/10' : ''"
-                  @click="openSessionDetail(s.id)"
-                >
-                  <td class="p-3 font-mono text-[11px]">{{ s.id }}</td>
-                  <td class="p-3 font-mono text-[10px] text-[#363e42]/60 max-w-[120px] truncate" :title="s.context_id">{{ s.context_id }}</td>
-                  <td class="p-3">
-                    <template v-if="editingSessionId === s.id">
-                      <input v-model="editingSessionTitle" class="w-full border rounded px-2 py-1 text-[12px] mb-1" maxlength="200" @click.stop />
-                      <input v-model="editingSessionNote" class="w-full border rounded px-2 py-1 text-[11px]" placeholder="备注（可选）" maxlength="500" @click.stop />
-                    </template>
-                    <template v-else>
-                      <div class="font-bold">{{ s.title || `会话 #${s.id}` }}</div>
-                      <div v-if="s.meta?.note" class="text-[10px] text-[#363e42]/50 mt-0.5">{{ s.meta.note }}</div>
-                    </template>
-                  </td>
-                  <td class="p-3 text-[11px] whitespace-nowrap">{{ fmtDateTime(s.created_at) }}</td>
-                  <td class="p-3 text-[11px] whitespace-nowrap">{{ fmtDateTime(s.updated_at) }}</td>
-                  <td class="p-3 text-[11px]">{{ s.message_count ?? s.meta?.message_count ?? 0 }}</td>
-                  <td class="p-3 whitespace-nowrap" @click.stop>
-                    <template v-if="editingSessionId === s.id">
-                      <button class="text-[11px] text-[#d97706] font-bold mr-2" @click="saveEditSessionRow(s.id)">保存</button>
-                      <button class="text-[11px] text-[#363e42]/50" @click="cancelEditSessionRow">取消</button>
-                    </template>
-                    <template v-else>
-                      <button class="text-[11px] text-[#363e42] font-bold mr-2" @click="startEditSessionRow(s, $event)">编辑</button>
-                      <button class="text-[11px] text-red-500" @click="archiveSessionRow(s.id, $event)">归档</button>
-                    </template>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p v-if="!sessionList.length" class="p-8 text-center text-[#363e42]/40 text-sm">暂无历史会话</p>
-            <ListPagination v-model:page="sessionQuery.page" v-model:size="sessionQuery.size" :total="sessionTotal" />
-          </div>
-          <div class="lg:col-span-2 bg-white rounded-2xl border p-4 min-h-[320px] flex flex-col">
-            <template v-if="sessionDetail">
-              <h3 class="font-black text-sm mb-1">{{ sessionDetail.title }}</h3>
-              <div class="text-[10px] text-[#363e42]/50 space-y-0.5 mb-3">
-                <div>会话 ID：{{ sessionDetail.id }}</div>
-                <details class="text-[10px]">
-                  <summary class="cursor-pointer text-[#363e42]/45 select-none">追踪 ID（运维/反馈用）</summary>
-                  <div class="font-mono break-all mt-1 text-[#363e42]/60">{{ sessionDetail.context_id }}</div>
-                </details>
-                <div>创建：{{ fmtDateTime(sessionDetail.created_at) }}</div>
-                <div>更新：{{ fmtDateTime(sessionDetail.updated_at) }}</div>
-                <div>消息数：{{ sessionDetail.message_count }}</div>
-              </div>
-              <ListQueryBar
-                v-model="msgQuery"
-                :show-name="false"
-                :sort-options="[{ value: 'created_at', label: '消息时间' }, { value: 'id', label: '消息 ID' }]"
-                keyword-placeholder="消息内容关键词"
-                @search="selectedSessionId && loadSessionMessages(selectedSessionId)"
-                @reset="msgQuery = { ...defaultListQuery(30), sortBy: 'created_at', sortOrder: 'asc' }; selectedSessionId && loadSessionMessages(selectedSessionId)"
-              />
-              <div class="space-y-3 flex-1 overflow-y-auto mt-3 min-h-0">
-                <div
-                  v-for="m in sessionMessages"
-                  :key="m.id"
-                  class="p-3 rounded-xl text-[13px] border"
-                  :class="m.role === 'user' ? 'bg-[#d97706]/10 border-[#d97706]/20' : 'bg-[#fcfcfc]'"
-                >
-                  <div class="text-[10px] font-bold text-[#363e42]/40 mb-1">{{ m.role === 'user' ? '用户' : '助手' }} · #{{ m.id }} · {{ fmtDateTime(m.created_at) }}</div>
-                  <div class="whitespace-pre-wrap">{{ m.content }}</div>
-                  <div v-if="m.intent_label" class="text-[10px] text-[#d97706] mt-1">意图: {{ m.intent_label }}</div>
-                </div>
-              </div>
-              <ListPagination v-model:page="msgQuery.page" v-model:size="msgQuery.size" :total="msgTotal" />
-            </template>
-            <p v-else class="text-center text-[#363e42]/40 text-sm pt-16">点击左侧会话查看消息回放</p>
-          </div>
-        </div>
-      </div>
+      <SessionHistoryPanel v-else-if="route.path === '/sessions'" class="flex-1 p-6 overflow-hidden flex flex-col min-h-0" />
 
       <EvalDashboard v-else-if="route.path === '/admin/eval'" class="flex-1 p-6 overflow-y-auto" />
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
+      <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
 
