@@ -52,6 +52,60 @@ def _rule_rewrite(query: str, history: list[dict]) -> str:
 
 
 def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
+    from app.llms import get_pipeline_llm
+
+    # 优先用 Ollama 本地小模型(快)，否则走主网关
+    pipeline_node = get_pipeline_llm()
+    if pipeline_node:
+        return _call_llm_with_node(pipeline_node, query, history)
+
+    return _call_llm_default(query, history)
+
+
+def _call_llm_with_node(node, query: str, history: list[dict]) -> dict | None:
+    """用指定网关节点调用 LLM"""
+    import httpx
+
+    hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
+    prompt = (
+        "你是企业智能客服的查询预处理模块。根据用户问题输出 JSON，字段：\n"
+        'intent 取值 product_consult|after_sale|chitchat|complaint；'
+        "rewritten_query 为利于知识库检索的改写问句；"
+        "query_keywords 为原问实体/关键词数组；"
+        "retrieval_terms 为映射后的内部业务检索词数组。\n"
+        "只输出 JSON，不要解释。\n"
+        f"历史:\n{hist or '无'}\n\n问题:{query}"
+    )
+    url = node.base_url.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": node.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "temperature": 0.1,
+        "max_tokens": 256,
+    }
+    try:
+        resp = httpx.post(url, json=payload, headers={
+            "Authorization": f"Bearer {node.api_key}",
+            "Content-Type": "application/json",
+        }, timeout=15.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            m = _JSON_RE.search(content)
+            if m:
+                result = json.loads(m.group())
+                if isinstance(result, dict) and result.get("rewritten_query"):
+                    node_name = getattr(node, 'name', 'ollama')
+                    logger.info("[AI问答-Pipeline|%s|快速预处理] ok", node_name)
+                    return result
+    except Exception as exc:
+        logger.warning("[AI问答-Pipeline|本地LLM|降级] err=%s", str(exc)[:120])
+    return None
+
+
+def _call_llm_default(query: str, history: list[dict]) -> dict | None:
+    """通过主网关调用 LLM"""
     llm = get_llm()
     hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
     prompt = (

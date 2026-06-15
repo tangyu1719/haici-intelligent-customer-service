@@ -266,6 +266,18 @@ def test_semantic_route(question: str, _user=Depends(get_current_user)):
     }
 
 
+# ── Prompt 段式指令清单 ──────────────────────────────────────
+
+@router.get("/prompt-segments")
+def get_prompt_segments(_user=Depends(get_current_user)):
+    """返回所有段式指令变量清单（供前端配置页展示与管理）。
+
+    每个段包含：key（变量名）、text（指令原文）、desc（是什么）、purpose（起到什么作用）。
+    """
+    from app.services.prompt_segments import list_all_segments
+    return {"ok": True, "segments": list_all_segments()}
+
+
 # ── 缓存统计 ─────────────────────────────────────────────────
 
 
@@ -284,3 +296,44 @@ def invalidate_cache(_user=Depends(get_current_user)):
 
     count = cache.invalidate()
     return {"ok": True, "cleared": count}
+
+
+# ── 管道设置（意图识别模型选择） ──
+
+@router.get("/pipeline-config")
+def get_pipeline_config(_user=Depends(get_current_user)):
+    """获取管道配置：意图识别使用的模型"""
+    import os
+    return {
+        "ok": True,
+        "ollama_available": os.path.exists(os.getenv("OLLAMA_BASE_URL", "")),
+        "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+        "ollama_model": os.getenv("OLLAMA_MODEL", "qwen2:0.5b"),
+        "models": [
+            {"key": "local_05b", "label": "本地 Qwen2 0.5B (最快, ~400MB)", "env_model": "qwen2:0.5b"},
+            {"key": "local_15b", "label": "本地 Qwen2 1.5B (均衡, ~1GB)", "env_model": "qwen2:1.5b"},
+            {"key": "api_gateway", "label": "API 网关模型 (ARK/豆包)", "env_model": ""},
+        ],
+    }
+
+
+class PipelineConfigBody(BaseModel):
+    intent_model: str = "local_05b"  # local_05b | local_15b | api_gateway
+
+
+@router.put("/pipeline-config")
+def update_pipeline_config(body: PipelineConfigBody, _user=Depends(get_current_user)):
+    """更新管道意图识别模型选择"""
+    model_map = {
+        "local_05b": "qwen2:0.5b",
+        "local_15b": "qwen2:1.5b",
+        "api_gateway": "",
+    }
+    model = model_map.get(body.intent_model, "qwen2:0.5b")
+    # 运行时更新环境变量
+    import os
+    if model:
+        os.environ["OLLAMA_MODEL"] = model
+    else:
+        os.environ.pop("OLLAMA_MODEL", None)
+    return {"ok": True, "intent_model": body.intent_model, "ollama_model": model}

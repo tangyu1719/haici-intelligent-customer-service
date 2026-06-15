@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { isAuthenticated, loadAuthFromStorage } from '../api/auth'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
@@ -15,6 +16,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/admin/logs/api-call', name: 'log-api', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:log:api' } },
   { path: '/admin/logs/schedule', name: 'log-schedule', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:log:schedule' } },
   { path: '/admin/eval', name: 'admin-eval', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:eval:view' } },
+  { path: '/admin/pipeline', name: 'admin-pipeline', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:config' } },
   { path: '/admin/agent-config', name: 'admin-agent-config', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:config' } },
   { path: '/admin/agent-gateway', name: 'admin-agent-gateway', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:gateway' } },
   { path: '/admin/gateway-security', name: 'admin-gateway-security', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:security' } },
@@ -31,10 +33,6 @@ const router = createRouter({
   routes,
 })
 
-function getToken(): string {
-  return localStorage.getItem('hc_access_token') || ''
-}
-
 function getUser(): { permissions?: string[]; roles?: string[] } | null {
   const raw = localStorage.getItem('hc_user')
   if (!raw) return null
@@ -47,7 +45,8 @@ function getUser(): { permissions?: string[]; roles?: string[] } | null {
 
 router.beforeEach((to) => {
   if (to.meta.public) return true
-  if (!getToken()) return { path: '/login', query: { redirect: to.fullPath } }
+  loadAuthFromStorage()
+  if (!isAuthenticated()) return { path: '/login', query: { redirect: to.fullPath } }
   const perm = to.meta.permission as string | undefined
   if (!perm) return true
   const user = getUser()

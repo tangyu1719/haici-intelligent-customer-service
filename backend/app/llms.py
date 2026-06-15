@@ -225,16 +225,25 @@ class LLMWrapper:
 
 
 
+        # 限制输入大小避免超出豆包4K上下文
+        trimmed = []
+        total = 0
+        max_in = 3000
+        for m in reversed(messages):
+            c = str(m.get("content", ""))
+            if total + len(c) > max_in:
+                r = max_in - total
+                if r > 50: trimmed.insert(0, {**m, "content": c[:r]})
+                break
+            trimmed.insert(0, m)
+            total += len(c)
+
         payload = {
-
             "model": node.model,
-
-            "messages": messages,
-
+            "messages": trimmed,
             "stream": True,
-
             "temperature": 0.2,
-
+            "max_tokens": 1024,
         }
 
         url = _openai_chat_url(node.base_url)
@@ -365,6 +374,22 @@ def get_llm() -> LLMWrapper:
 
 
 _embedder = None
+
+
+def get_pipeline_llm():
+    """意图识别/Query改写专用LLM：优先Ollama本地模型(快)，否则走网关"""
+    ollama_base = os.getenv("OLLAMA_BASE_URL", "").strip()
+    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2:0.5b").strip()
+    if ollama_base and ollama_model:
+        from app.services.llm_gateway import GatewayNode
+        node = GatewayNode(
+            id="ollama_pipeline", name="Ollama Pipeline", provider="openai_compatible",
+            base_url=ollama_base, api_key="ollama", model=ollama_model,
+            priority=1, weight=100, status="active",
+        )
+        logger.info("[LLM-Pipeline] 使用Ollama本地模型: %s @ %s", ollama_model, ollama_base)
+        return node
+    return None
 
 
 

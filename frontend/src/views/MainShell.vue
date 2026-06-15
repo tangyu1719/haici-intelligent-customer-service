@@ -1,9 +1,10 @@
 ﻿<script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, loadAuthFromStorage } from '../api/auth'
+import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, isAuthenticated, loadAuthFromStorage, redirectToLogin } from '../api/auth'
 import type { KnowledgeBaseBrief, KnowledgeDoc } from '../types'
 import AgentConfigPanel from '../components/AgentConfigPanel.vue'
+import PipelineSettingsPanel from '../components/PipelineSettingsPanel.vue'
 import GatewayPanel from '../components/GatewayPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
@@ -20,6 +21,7 @@ import LogManagementPanel from '../components/logs/LogManagementPanel.vue'
 import type { LogKind } from '../components/logs/LogManagementPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 import { fixDisplayFilename } from '../utils/filename'
+import SidebarMenuTree from '../components/SidebarMenuTree.vue'
 
 interface MenuNode {
   id: number
@@ -66,9 +68,13 @@ const profileMenu = computed(() =>
 
 const syncExpandedMenus = (): void => {
   const next = new Set<number>()
+  const containsPath = (node: MenuNode, path: string): boolean => {
+    if (node.path === path) return true
+    return (node.children || []).some((c) => containsPath(c, path))
+  }
   const walk = (nodes: MenuNode[]) => {
     for (const n of nodes) {
-      if (n.children?.some((c) => c.path === activePath.value)) {
+      if (n.children?.some((c) => containsPath(c, activePath.value))) {
         next.add(n.id)
       }
       if (n.children?.length) walk(n.children)
@@ -85,8 +91,13 @@ const toggleMenuGroup = (id: number): void => {
   expandedMenuIds.value = next
 }
 
-const isChildMenuActive = (node: MenuNode): boolean =>
-  !!node.children?.some((c) => c.path === activePath.value)
+const isChildMenuActive = (node: MenuNode): boolean => {
+  const containsPath = (n: MenuNode, path: string): boolean => {
+    if (n.path === path) return true
+    return (n.children || []).some((c) => containsPath(c, path))
+  }
+  return (node.children || []).some((c) => containsPath(c, activePath.value))
+}
 
 const pageTitle = computed(() => {
   const map: Record<string, string> = {
@@ -102,8 +113,12 @@ const pageTitle = computed(() => {
     '/admin/logs/api-call': 'API 调用日志',
     '/admin/logs/schedule': '定时任务日志',
     '/admin/eval': 'EVAL 评测',
+    '/admin/pipeline': '管道设置',
     '/admin/agent-config': 'Agent 配置',
-    '/admin/agent-gateway': 'Agent 网关',
+    '/admin/agent-gateway': '模型连接',
+    '/admin/gateway-security': '安全合规',
+    '/admin/gateway-cache': '缓存管理',
+    '/admin/gateway-circuit': '熔断监控',
     '/admin/rbac': '用户权限',
     '/admin/feedback': '用户反馈',
     '/admin/users': '用户权限',
@@ -336,6 +351,10 @@ watch(() => [kbQuery.value.page, kbQuery.value.size], () => {
 })
 
 onMounted(async () => {
+  if (!isAuthenticated()) {
+    redirectToLogin()
+    return
+  }
   loadAuthFromStorage()
   await loadMenus()
 })
@@ -359,47 +378,13 @@ onMounted(async () => {
 
       <div class="shell-sidebar-middle flex-1 flex flex-col min-h-0 relative">
         <nav class="shell-sidebar-nav py-4 flex-1 overflow-y-auto px-3 flex flex-col gap-1 min-h-0">
-          <template v-for="node in primaryMenus" :key="node.id">
-            <div v-if="node.menu_type === 'M' && node.children?.length" class="flex flex-col gap-0.5">
-              <button
-                type="button"
-                class="w-full flex items-center justify-between py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
-                :class="isChildMenuActive(node) ? 'bg-[#363e42]/10 text-[#363e42]' : 'text-[#363e42] hover:bg-[#363e42]/5'"
-                @click="isSidebarOpen ? toggleMenuGroup(node.id) : undefined"
-              >
-                <span v-if="isSidebarOpen">{{ node.name }}</span>
-                <span v-else class="w-full text-center text-[10px]">{{ node.name.slice(0, 2) }}</span>
-                <i
-                  v-if="isSidebarOpen"
-                  class="fas text-[10px] text-[#363e42]/40"
-                  :class="expandedMenuIds.has(node.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
-                ></i>
-              </button>
-              <div
-                v-if="isSidebarOpen && expandedMenuIds.has(node.id)"
-                class="ml-2 pl-2 border-l border-[#363e42]/10 flex flex-col gap-0.5"
-              >
-                <router-link
-                  v-for="child in node.children.filter((c) => c.menu_type === 'C' && c.path)"
-                  :key="child.id"
-                  :to="child.path || '/'"
-                  class="w-full flex items-center py-2 px-3 rounded-lg text-[11px] font-bold transition-all"
-                  :class="activePath === child.path ? 'bg-[#363e42] text-white' : 'text-[#363e42]/80 hover:bg-[#363e42]/5'"
-                >
-                  {{ child.name }}
-                </router-link>
-              </div>
-            </div>
-            <router-link
-              v-else-if="node.menu_type === 'C' && node.path"
-              :to="node.path || '/'"
-              class="w-full flex items-center py-2.5 px-3 rounded-xl text-[12px] font-bold transition-all"
-              :class="activePath === node.path ? 'bg-[#363e42] text-white' : 'text-[#363e42] hover:bg-[#363e42]/5'"
-            >
-              <span v-if="isSidebarOpen">{{ node.name }}</span>
-              <span v-else class="w-full text-center text-[10px]">{{ node.name.slice(0, 2) }}</span>
-            </router-link>
-          </template>
+          <SidebarMenuTree
+            :nodes="primaryMenus"
+            :is-sidebar-open="isSidebarOpen"
+            :active-path="activePath"
+            :expanded-menu-ids="expandedMenuIds"
+            @toggle="toggleMenuGroup"
+          />
         </nav>
         <button
           type="button"
@@ -628,6 +613,7 @@ onMounted(async () => {
       <EvalDashboard v-else-if="route.path === '/admin/eval'" class="flex-1 p-6 overflow-y-auto" />
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
       <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
+      <PipelineSettingsPanel v-else-if="route.path === '/admin/pipeline'" class="flex-1 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
       <GatewaySecurityPanel v-else-if="route.path === '/admin/gateway-security'" class="flex-1 overflow-y-auto" />
