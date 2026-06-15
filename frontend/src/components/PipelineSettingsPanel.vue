@@ -127,7 +127,7 @@ onMounted(load)
                 <span class="text-[12px] font-bold">{{ m.label }}</span>
                 <span v-if="m.key==='api_gateway'&&ollamaStatus!=='connected'" class="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-600">当前使用</span>
                 <span v-if="m.key!=='api_gateway'&&ollamaStatus!=='connected'" class="text-[9px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-400">需Ollama</span>
-                <span v-if="m.key!=='api_gateway'&&ollamaModels.some(om=>m.env_model&&om.name.includes(m.env_model.replace(':','')));" class="text-[9px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">已安装</span>
+                <span v-if="m.key!=='api_gateway'&&ollamaModels.some(om=>m.env_model&&om.name.includes(m.env_model.replace(':','')))" class="text-[9px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-600">已安装</span>
               </div>
               <div class="text-[10px] text-[#94a3b8] mt-0.5">
                 <span v-if="m.key==='local_05b'">🚀 本地CPU推理，改写 ~1s，磁盘 ~400MB</span>
