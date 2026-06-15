@@ -48,18 +48,10 @@ def suggest_intents_llm(
     a = (answer or "").strip()
     if not q or len(a) < 10:
         return []
+    from app.services.prompt_segments import build_intent_suggest_prompt
+
     enum_text = "、".join(f"{k}={v}" for k, v in INTENT_LABELS.items())
-    prompt = (
-        "你是智能客服意图纠偏助手。系统误判了用户意图，请根据用户提问与 AI 回答，"
-        "推测用户更可能属于哪种意图。只输出 JSON 数组，最多 2 项，每项字段：\n"
-        "code（必须为 product_consult|after_sale|chitchat|complaint 之一或 unknown）、"
-        "label（中文概括，不超过 16 字）、summary（一句话理由，不超过 40 字）。\n"
-        f"标准意图：{enum_text}\n"
-        f"系统识别：{detected_label}（{detected_intent}）\n"
-        f"用户提问：{q[:300]}\n"
-        f"AI 回答：{a[:400]}\n"
-        "只输出 JSON 数组。"
-    )
+    prompt = build_intent_suggest_prompt(q, a, detected_intent, detected_label, enum_text)
     try:
         raw = get_llm().call(prompt, temperature=0.2, max_tokens=256)
         m = _JSON_ARR.search(raw)

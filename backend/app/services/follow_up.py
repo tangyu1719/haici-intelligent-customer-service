@@ -15,11 +15,8 @@ _JSON_ARR = re.compile(r"\[[\s\S]*?\]")
 def generate_follow_ups(question: str, answer: str, intent: str) -> list[str]:
     if not answer or len(answer) < 20:
         return []
-    prompt = (
-        "根据用户问题与 AI 回答，生成 2～3 个简短中文追问建议，JSON 数组格式，每项不超过 20 字。"
-        "只输出 JSON 数组。\n"
-        f"意图:{intent}\n问题:{question[:200]}\n回答:{answer[:400]}"
-    )
+    from app.services.prompt_segments import build_follow_up_prompt
+    prompt = build_follow_up_prompt(intent, question, answer)
     try:
         raw = get_llm().call(prompt, temperature=0.3, max_tokens=200)
         m = _JSON_ARR.search(raw)

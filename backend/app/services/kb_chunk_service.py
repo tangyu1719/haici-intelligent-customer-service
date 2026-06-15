@@ -408,12 +408,8 @@ def _split_ai_semantic(text: str, max_segments: int = 24) -> List[ChunkPiece]:
     if not raw:
         return []
     preview = raw[:12000]
-    system = (
-        "你是文档语义分段助手。根据全文主题与逻辑，将文档切分为若干完整语义段。"
-        "每段应可独立检索、语义自洽，禁止截断句子。"
-        f"输出 JSON 数组，长度不超过 {max_segments}，每项格式 {{\"text\":\"段落全文\"}}。"
-        "只输出 JSON，不要 markdown 代码块或解释。"
-    )
+    from app.services.prompt_segments import build_semantic_split_prompt
+    system = build_semantic_split_prompt(max_segments=max_segments)
     user = f"请划分以下文档：\n\n{preview}"
     try:
         from app.llms import get_llm

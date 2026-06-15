@@ -23,7 +23,6 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.llms import get_llm
-from app.services.rag_slice_utils import picture_answer_rules
 
 logger = logging.getLogger(__name__)
 
@@ -147,19 +146,8 @@ def _generate_layer_summary_with_llm(layers: dict[str, Any], query: str) -> str:
             f"  关键规则/要点:\n  - {rules_text}"
         )
 
-    prompt = (
-        "你是企业知识库审核助手。请阅读以下从多个文档检索到的信息，"
-        "生成一个结构化摘要供客服使用。\n\n"
-        f"用户问题：{query}\n\n"
-        "检索到的文档与规则：\n"
-        + "\n\n".join(group_descriptions)
-        + "\n\n输出要求（JSON 格式）：\n"
-        '{\n  "summary": "200字以内的综合摘要",\n'
-        '  "priority_rules": ["规则1", "规则2"],\n'
-        '  "confidence": 80,\n'
-        '  "needs_clarification": false\n'
-        "}"
-    )
+    from app.services.prompt_segments import build_anti_dilution_summary_prompt as _build_summary_prompt
+    prompt = _build_summary_prompt(query, group_descriptions)
 
     try:
         llm = get_llm()
@@ -215,15 +203,9 @@ def _build_anti_dilution_context(
             parts.append(f"\n[切片{slice_idx}] {sl['content'][:600]}")
             slice_idx += 1
 
-    cite_instr = (
-        "【防稀释引用规则】\n"
-        "1. 优先引用上述「优先规则」列表中的条款\n"
-        "2. 若多个文档存在冲突规则，明确指出差异并建议以最新/最权威的文档为准\n"
-        "3. 每一步推断必须对应一个具体的切片编号\n"
-        "4. 不要合并或混淆来自不同文档的规则\n"
-        + picture_answer_rules()
-    )
+    from app.services.prompt_segments import build_anti_dilution_cite_instruction as _build_instr
 
+    cite_instr = _build_instr()
     return "\n".join(parts), cite_instr
 
 
@@ -320,10 +302,8 @@ def build_anti_dilution_prompt_messages(
     lines.reverse()
     hist_block = "\n".join(lines)
 
-    system = (
-        "你是企业智能客服。只能依据知识库片段回答，不得编造。\n"
-        "若资料不足请明确说明无法回答。\n\n"
-        + cite_instr
-    )
-    user = f"意图:{intent}\n历史:\n{hist_block or '无'}\n\n{rag_context}\n\n问题:{query}"
+    from app.services.prompt_segments import build_rag_system_prompt, build_rag_user_prompt
+
+    system = build_rag_system_prompt(cite_instr, include_picture_rule=False)
+    user = build_rag_user_prompt(intent, hist_block, rag_context, query)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]

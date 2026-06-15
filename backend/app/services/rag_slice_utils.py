@@ -1,8 +1,12 @@
-"""RAG 预取切片规范化与 LLM 引用块（对齐 web_rebuild rag_slice_utils）。"""
+"""RAG 预取切片规范化与 LLM 引用块（对齐 web_rebuild rag_slice_utils）。
+
+引用格式与插图规则已收敛到 prompt_segments 模块：
+  - build_citation_format_block() → 完整引用格式指令
+  - build_picture_answer_rules() → 插图规则指令
+"""
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 from langchain_core.documents import Document
@@ -62,50 +66,23 @@ def normalize_rag_slices_from_docs(docs: list[Document], *, max_slices: int = 8)
 
 
 def picture_answer_rules() -> str:
-    """供 RAG / 防稀释等多条回答链路复用的插图规则。"""
-    return _picture_answer_rules()
+    """供 RAG / 防稀释等多条回答链路复用的插图规则。
 
+    段式指令变量来自 prompt_segments.build_picture_answer_rules()。
+    """
+    from app.services.prompt_segments import build_picture_answer_rules as _build
 
-def _picture_answer_rules() -> str:
-    return "\n".join(
-        [
-            "四、含图切片与正文插图（picture 块 · 必须遵守）",
-            "  · 切片中的 {picture_id:…; url:…; description:…} 仅供你理解画面，禁止将 description 原文直接输出。",
-            "  · 仅当某张图与用户问题**直接相关**时，才插入插图，格式必须严格为：",
-            "    {picture_id:图N-xxx; url:切片中的绝对路径;}",
-            "    （不要带 description 字段，也不要在 url 后添加任何其他字段）",
-            "  · ★ 关键规则 ★ 图片上的红框/数字标记（如 ①②③ 或 区块(1)(2)(3)），"
-            "你必须在正文中用文字逐条说明每个标记的含义：",
-            "    「区块(1)：输入用户账号及密码」",
-            "    「区块(2)：点击登录按钮进入系统」",
-            "    「区块(3)：可修改密码」",
-            "    这些区块说明是文档核心内容，必须保留，不得省略！",
-            "  · 无关图片一律不插；正文禁止「见下图」「如上图所示」等空泛表述。",
-        ]
-    )
+    return _build()
 
 
 def _citation_format_block() -> str:
-    return "\n".join(
-        [
-            "【回答格式 · 按句引用 + 逻辑注释（必须严格遵守）】",
-            "一、正文（按句为单位）",
-            "  · 每一句依据知识库写出的论断，句末必须标注引用编号，格式为阿拉伯数字 1、2、3…（不用上标）。",
-            "  · 同一句话可引用多个切片则写 1,2；编号对应下方预检索文献 [n]，禁止无编号的知识库论断。",
-            "二、正文结束后依次输出两节（标题固定，不可省略）：",
-            "  ## 文献切片明细",
-            "  逐条列出本回答用到的切片（按 [n] 编号），每条须含：",
-            "    - 切片[n]：所属父文档《父文档名》（父文档路径）",
-            "    - 切片全文：（完整粘贴该切片正文，不可截断）",
-            "    - 父文档全文：（写「见路径 xxx，前端可点击查看」）",
-            "  ## 注释",
-            "  按正文引用编号逐条写「处逻辑链路」（与正文句末编号一一对应，不可合并）：",
-            "    1 处逻辑链路：摘录切片【1】原文「…关键句…」；因原文…，故正文第1句写成…。置信度：100",
-            "  · 置信度为 0–100 整数。",
-            "三、禁止编造未出现在切片中的事实。",
-            _picture_answer_rules(),
-        ]
-    )
+    """完整引用格式指令块。
+
+    段式指令变量来自 prompt_segments.build_citation_format_block()。
+    """
+    from app.services.prompt_segments import build_citation_format_block as _build
+
+    return _build()
 
 
 def build_rag_llm_blocks(

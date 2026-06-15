@@ -43,16 +43,12 @@ def _save_config(data: dict[str, Any]) -> None:
 
 
 def _default_config() -> dict[str, Any]:
+    from app.services.prompt_segments import build_doc_summary_default_prompt, build_doc_structure_check_default_prompt
+
     return {
         "summary": {
             "enabled": True,
-            "prompt": (
-                "你是文档摘要整理助手。请用200字以内的精简中文描述这份文档主要讲了哪些内容。\n"
-                "注意：摘要描述的是'文档涉及了哪些方面/话题'，而不是列出具体数据或结论。\n"
-                "例如：'本文档介绍了公司产品的功能特性、定价策略以及售后服务政策，并对比了竞品方案。'\n"
-                "不要写：'该系统有35个功能，价格为999元。'\n\n"
-                "只输出摘要文本，不要JSON、不要Markdown格式。"
-            ),
+            "prompt": build_doc_summary_default_prompt(),
             "max_length": 200,
         },
         "metadata": {
@@ -67,12 +63,7 @@ def _default_config() -> dict[str, Any]:
         },
         "structure_check": {
             "enabled": True,
-            "prompt": (
-                "你是文档结构检查助手。分析以下文档内容，判断其是否已有清晰的结构（标题层级、段落分明、逻辑有序），"
-                "还是属于杂乱无章的内容（如聊天记录、碎片笔记、无格式文本）。\n"
-                "输出JSON：{\"has_structure\": true/false, \"structure_type\": \"md_headings/pure_paragraphs/chat_logs/mixed\", "
-                "\"confidence\": 0-100, \"suggestion\": \"建议处理方式的简短说明\"}"
-            ),
+            "prompt": build_doc_structure_check_default_prompt(),
             "min_size_bytes": 100,
             "max_images_check": 50,
         },
