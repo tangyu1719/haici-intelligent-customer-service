@@ -260,15 +260,6 @@ const resetLogQuery = (): void => {
   loadAdminLogs()
 }
 
-const loadLlmGateway = async (): Promise<void> => {
-  try {
-    const res = await fetch('/api/v1/system/llm-gateway', { headers: authHeaders() })
-    if (res.ok) llmGateway.value = await res.json()
-  } catch {
-    llmGateway.value = null
-  }
-}
-
 const loadMe = async (): Promise<void> => {
   const res = await fetch('/api/v1/auth/me', { headers: authHeaders() })
   if (res.ok) {
@@ -289,11 +280,6 @@ const logout = async (): Promise<void> => {
   }
   clearAuth()
   router.push('/login')
-}
-
-const providerLabel = (p: string): string => {
-  const map: Record<string, string> = { ark: '火山方舟 ARK', qwen: '通义千问', openai_compatible: 'OpenAI 兼容' }
-  return map[p] || p || '未配置'
 }
 
 const uploadKnowledge = async (event: Event): Promise<void> => {
@@ -394,7 +380,6 @@ watch(() => [adminLogPage.value, adminLogSize.value], () => {
 onMounted(async () => {
   loadAuthFromStorage()
   await loadMenus()
-  await loadLlmGateway()
 })
 </script>
 
@@ -515,12 +500,8 @@ onMounted(async () => {
     </aside>
 
     <main class="shell-main flex-1 flex flex-col h-full relative min-w-0">
-      <header v-if="!hideGlobalHeader" class="shell-main-header h-16 flex items-center justify-between px-6 shrink-0">
+      <header v-if="!hideGlobalHeader" class="shell-main-header h-16 flex items-center px-6 shrink-0">
         <span class="text-[14px] font-black text-[#363e42]">{{ pageTitle }}</span>
-        <div v-if="llmGateway?.active_chat?.name" class="text-right hidden sm:block">
-          <div class="text-[11px] font-bold text-[#363e42]">{{ providerLabel(llmGateway.active_chat.provider) }} · {{ llmGateway.active_chat.name }}</div>
-          <div class="text-[10px] text-[#363e42]/50 font-mono">{{ llmGateway.active_chat.model }}</div>
-        </div>
       </header>
 
       <ChatPanel v-if="route.path === '/chat'" />
@@ -691,6 +672,10 @@ onMounted(async () => {
       <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
+      <GatewaySecurityPanel v-else-if="route.path === '/admin/gateway-security'" class="flex-1 overflow-y-auto" />
+      <GatewayCachePanel v-else-if="route.path === '/admin/gateway-cache'" class="flex-1 overflow-y-auto" />
+      <GatewayCircuitPanel v-else-if="route.path === '/admin/gateway-circuit'" class="flex-1 overflow-y-auto" />
+      <RbacAdminPanel v-else-if="route.path === '/admin/rbac'" class="flex-1 overflow-y-auto" />
 
       <div v-else-if="route.path.startsWith('/admin/logs/')" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-6xl mx-auto bg-white rounded-2xl border overflow-hidden">
