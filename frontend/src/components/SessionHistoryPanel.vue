@@ -25,6 +25,40 @@ const editingSessionTitle = ref('')
 const editingSessionNote = ref('')
 const listExporting = ref(false)
 const sessionExporting = ref(false)
+const canViewAll = computed(() => hasPerm('session:view:all'))
+const filterUserId = ref('')
+const filterUserKeyword = ref('')
+const userOptions = ref<Array<{ id: number; label: string }>>([])
+const persistIntervalHint = ref(10)
+
+const userDisplayLabel = (s: ChatSessionItem): string => {
+  if (s.nickname) return s.nickname
+  if (s.username) return s.username
+  if (s.user_no) return `#${s.user_no}`
+  return s.user_id ? `用户 ${s.user_id}` : '-'
+}
+
+const loadPersistInterval = async (): Promise<void> => {
+  const res = await fetch('/api/v1/sessions/settings/persist-interval', { headers: authHeaders() })
+  if (res.ok) {
+    const data = await res.json()
+    persistIntervalHint.value = data.session_active_persist_interval_minutes ?? 10
+  }
+}
+
+const searchUsers = async (): Promise<void> => {
+  if (!canViewAll.value) return
+  const kw = filterUserKeyword.value.trim()
+  const qs = toSearchParams({ ...defaultListQuery(20), keyword: kw, page: 1, size: 20 })
+  const res = await fetch(`/api/v1/admin/rbac/users?${qs}`, { headers: authHeaders() })
+  if (res.ok) {
+    const data = await res.json()
+    userOptions.value = (data.items || []).map((u: { id: number; nickname?: string; username?: string; user_no?: string }) => ({
+      id: u.id,
+      label: u.nickname || u.username || `#${u.user_no || u.id}`,
+    }))
+  }
+}
 
 const fmtDateTime = (s?: string): string => {
   if (!s) return '-'
@@ -56,7 +90,11 @@ const filteredMessages = computed(() => {
 
 const loadSessions = async (): Promise<void> => {
   if (!hasPerm('session:view')) return
-  const qs = toSearchParams(sessionQuery.value)
+  const extra: Record<string, string | undefined> = {}
+  if (canViewAll.value && filterUserId.value.trim()) {
+    extra.user_id = filterUserId.value.trim()
+  }
+  const qs = toSearchParams(sessionQuery.value, extra)
   const res = await fetch(`/api/v1/sessions?${qs}`, { headers: authHeaders() })
   if (res.ok) {
     const data = await res.json()
@@ -69,6 +107,9 @@ const loadSessions = async (): Promise<void> => {
 
 const resetSessionQuery = (): void => {
   sessionQuery.value = defaultListQuery(20)
+  filterUserId.value = ''
+  filterUserKeyword.value = ''
+  userOptions.value = []
   loadSessions()
 }
 
@@ -150,8 +191,12 @@ const saveEditSessionRow = async (id: number): Promise<void> => {
 
 const archiveSessionRow = async (id: number, e?: Event): Promise<void> => {
   e?.stopPropagation()
-  if (!window.confirm('确定归档该会话？')) return
-  await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
+  if (!window.confirm('确定删除该会话？删除后将从您的列表中隐藏，管理员仍可在「会话审计」中查看完整记录。')) return
+  const res = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
+  if (!res.ok) {
+    window.alert('删除失败，请稍后重试')
+    return
+  }
   if (selectedSessionId.value === id) closeSessionDetail()
   await loadSessions()
 }
@@ -218,7 +263,10 @@ const exportCurrentSession = async (format: 'json' | 'md'): Promise<void> => {
 
 watch(() => [sessionQuery.value.page, sessionQuery.value.size], loadSessions)
 
-onMounted(loadSessions)
+onMounted(async () => {
+  await loadPersistInterval()
+  await loadSessions()
+})
 </script>
 
 <template>
@@ -299,7 +347,7 @@ onMounted(loadSessions)
                   </template>
                   <template v-else>
                     <button class="text-[11px] text-[#363e42] font-bold mr-2" @click="startEditSessionRow(s, $event)">编辑</button>
-                    <button class="text-[11px] text-red-500" @click="archiveSessionRow(s.id, $event)">归档</button>
+                    <button class="text-[11px] text-red-500" title="从界面删除（管理员仍可审计）" @click="archiveSessionRow(s.id, $event)">🗑 删除</button>
                   </template>
                 </td>
               </tr>
@@ -323,6 +371,14 @@ onMounted(loadSessions)
             </p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              class="export-btn text-red-600 border-red-200"
+              title="从界面删除（管理员仍可审计）"
+              @click="archiveSessionRow(sessionDetail.id, $event)"
+            >
+              删除会话
+            </button>
             <button
               type="button"
               class="export-btn"
@@ -520,5 +576,18 @@ onMounted(loadSessions)
 }
 .close-detail-btn:hover {
   color: #363e42;
+}
+.delete-detail-btn {
+  font-size: 11px;
+  font-weight: 700;
+  color: #dc2626;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: #fff;
+  cursor: pointer;
+}
+.delete-detail-btn:hover {
+  background: rgba(239, 68, 68, 0.06);
 }
 </style>
