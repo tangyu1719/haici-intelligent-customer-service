@@ -92,6 +92,8 @@ const inputText = ref('')
 const isWaiting = ref(false)
 let activeStreamAssistant: ChatMessage | null = null
 const sessionId = ref<number | null>(null)
+let persistTimer: ReturnType<typeof setInterval> | null = null
+let persistIntervalMinutes = 10
 const chatSessions = ref<ChatSessionItem[]>([])
 const sessionTotal = ref(0)
 const sessionQuery = ref<ListQueryState>({ ...defaultListQuery(10), sortBy: 'updated_at', sortOrder: 'desc' })
@@ -374,10 +376,55 @@ const switchSession = async (id: number): Promise<void> => {
   if (isWaiting.value) return
   speechInput.stop()
   stopSessionPoll()
+  const prev = sessionId.value
+  if (prev && prev !== id) {
+    void syncSessionToDb(prev, 'switch')
+  }
   sessionId.value = id
   saveLastSession(id)
   await loadSessionMessages(id)
   pollSessionUntilReady(id)
+  restartPersistTimer()
+}
+
+const syncSessionToDb = async (sid: number, reason = 'interval'): Promise<void> => {
+  try {
+    await fetch(`/api/v1/sessions/${sid}/sync`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ reason }),
+    })
+  } catch {
+    /* 静默失败，下次间隔重试 */
+  }
+}
+
+const stopPersistTimer = (): void => {
+  if (persistTimer) {
+    clearInterval(persistTimer)
+    persistTimer = null
+  }
+}
+
+const restartPersistTimer = (): void => {
+  stopPersistTimer()
+  if (!sessionId.value) return
+  const ms = Math.max(60_000, persistIntervalMinutes * 60_000)
+  persistTimer = setInterval(() => {
+    if (sessionId.value) void syncSessionToDb(sessionId.value, 'interval')
+  }, ms)
+}
+
+const loadPersistInterval = async (): Promise<void> => {
+  try {
+    const res = await fetch('/api/v1/sessions/settings/persist-interval', { headers: authHeaders() })
+    if (res.ok) {
+      const data = await res.json()
+      persistIntervalMinutes = data.session_active_persist_interval_minutes ?? 10
+    }
+  } catch {
+    persistIntervalMinutes = 10
+  }
 }
 
 const newSession = async (): Promise<void> => {
@@ -393,6 +440,7 @@ const newSession = async (): Promise<void> => {
   saveLastSession(data.id as number)
   editingSessionId.value = null
   await loadChatSessions()
+  restartPersistTimer()
 }
 
 const startEditSession = (s: ChatSessionItem, e: Event): void => {
@@ -947,12 +995,15 @@ watch(() => [sessionQuery.value.page, sessionQuery.value.size], loadChatSessions
 
 onBeforeUnmount(() => {
   stopSessionPoll()
+  stopPersistTimer()
+  if (sessionId.value) void syncSessionToDb(sessionId.value, 'exit')
   if (isWaiting.value && activeStreamAssistant && sessionId.value) {
     saveStreamDraft(sessionId.value, activeStreamAssistant)
   }
 })
 
 onMounted(async () => {
+  await loadPersistInterval()
   await loadChatConfig()
   await loadChatSessions()
   await loadPlatformHealth(false)
