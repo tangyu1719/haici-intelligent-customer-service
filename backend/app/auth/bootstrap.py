@@ -17,6 +17,7 @@ from app.auth.seed import (
     sync_feedback_menu,
     sync_log_menu_group,
     sync_system_rbac_menu,
+    sync_chat_faq_menu,
 )
 from app.auth.casbin_enforcer import seed_casbin_policies
 from app.database import SessionLocal, engine
@@ -37,6 +38,8 @@ _SESSION_COLUMN_DDL = [
     ("context_id", "ADD COLUMN context_id VARCHAR(36) NULL COMMENT '上下文UUID' AFTER id"),
     ("meta_json", "ADD COLUMN meta_json JSON NULL COMMENT '扩展元数据' AFTER title"),
     ("status", "ADD COLUMN status TINYINT NOT NULL DEFAULT 1 COMMENT '1正常0归档' AFTER meta_json"),
+    ("user_deleted", "ADD COLUMN user_deleted TINYINT NOT NULL DEFAULT 0 COMMENT '用户侧软删除1是0否' AFTER status"),
+    ("user_deleted_at", "ADD COLUMN user_deleted_at DATETIME NULL COMMENT '用户删除时间' AFTER user_deleted"),
 ]
 
 _FEEDBACK_COLUMN_DDL = [
@@ -166,6 +169,21 @@ def _ensure_chat_sessions_columns(conn) -> None:
         msg = str(exc)
         if "Duplicate" not in msg and "1061" not in msg and "already exists" not in msg:
             logger.warning("[会话持久化-迁移|bootstrap|uk_sessions_context|硬编执行|跳过] err=%s", msg[:120])
+    # 历史「归档删除」→ 用户软删除，管理员审计仍可见
+    try:
+        conn.execute(
+            text(
+                """
+                UPDATE chat_sessions
+                SET user_deleted = 1,
+                    user_deleted_at = COALESCE(user_deleted_at, updated_at, NOW()),
+                    status = 1
+                WHERE status = 0 AND (user_deleted IS NULL OR user_deleted = 0)
+                """
+            )
+        )
+    except Exception as exc:
+        logger.warning("[会话持久化-迁移|bootstrap|backfill_user_deleted|硬编执行|跳过] err=%s", str(exc)[:120])
 
 
 def _run_sql_migration() -> None:
@@ -207,7 +225,11 @@ def ensure_auth_ready() -> None:
         sync_profile_menu_group(db)
         sync_agent_settings_menu(db)
         sync_system_rbac_menu(db)
+        sync_chat_faq_menu(db)
         backfill_user_no(db)
+        from app.services.chat_faq import seed_default_chat_faq
+
+        seed_default_chat_faq(db)
         ensure_bootstrap_admin(db)
         ensure_admin_user(db)
         seed_casbin_policies()
