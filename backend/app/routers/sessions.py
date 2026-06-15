@@ -170,6 +170,8 @@ def list_sessions(
     current_user: User = Depends(get_current_user),
 ):
     view_all = _can_view_all_sessions(db, current_user)
+    if user_id is not None and not view_all:
+        raise HTTPException(status_code=403, detail="无权按用户筛选会话")
     msg_counts = (
         db.query(ChatMessage.session_id.label("sid"), func.count(ChatMessage.id).label("message_count"))
         .group_by(ChatMessage.session_id)
@@ -211,11 +213,20 @@ def list_sessions(
     return SessionPageResponse(**page_result(items, total, qry))
 
 
+@router.get("/settings/persist-interval")
+def get_persist_interval_public(_user: User = Depends(get_current_user)):
+    """前端读取活跃会话落库间隔（分钟）。"""
+    from app.services.system_settings import get_session_persist_interval_minutes
+
+    return {"session_active_persist_interval_minutes": get_session_persist_interval_minutes()}
+
+
 @router.get("/{session_id}", response_model=SessionDetailResponse)
 def get_session_detail(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     session = _accessible_session(db, session_id, current_user)
     msg_count = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == session_id).scalar() or 0
-    base = _session_item(session, int(msg_count))
+    owner = db.get(User, session.user_id)
+    base = _session_item(session, int(msg_count), owner)
     msg_qry = ListQuery(page=1, size=50, sort_by="created_at", sort_order="asc")
     mq = _messages_query(db, session_id, msg_qry)
     rows, _ = paginate(mq, msg_qry)
@@ -234,7 +245,7 @@ def get_messages(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _owned_session(db, session_id, current_user.id)
+    _accessible_session(db, session_id, current_user)
     q = _messages_query(db, session_id, qry)
     rows, total = paginate(q, qry)
     return MessagePageResponse(**page_result([_message_item(m) for m in rows], total, qry))
@@ -290,3 +301,23 @@ def user_delete_session(
         "user_deleted": True,
         "message": "已从您的界面隐藏，管理员审计记录仍保留",
     }
+
+
+class SessionSyncRequest(BaseModel):
+    reason: str = Field(default="interval", max_length=32)
+
+
+@router.post("/{session_id}/sync")
+async def sync_session(
+    session_id: int,
+    body: SessionSyncRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """活跃会话定时/切换/退出落库：刷新会话元数据供历史查询。"""
+    _owned_session(db, session_id, current_user.id)
+    reason = (body.reason if body else "interval") or "interval"
+    ok = await sync_active_session_async(session_id=session_id, user_id=current_user.id, reason=reason)
+    if not ok:
+        raise HTTPException(status_code=404, detail="会话不可用")
+    return {"ok": True, "session_id": session_id, "reason": reason}
