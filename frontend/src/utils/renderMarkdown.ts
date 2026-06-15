@@ -84,9 +84,15 @@ export function linkifyCitations(text: string, messageScope?: string | number): 
   return out
 }
 
+function neutralizeTildeStrikethrough(text: string): string {
+  // marked GFM 将成对半角 ~ 解析为 <del>；中文「哦~」与重复句会误显示删除线
+  return text.replace(/~/g, '～')
+}
+
 function preprocess(raw: string, opts?: RenderMarkdownOptions): string {
   const scope = resolveScope(opts)
   let text = String(raw || '')
+  text = neutralizeTildeStrikethrough(text)
   text = renderPictureBlocks(text)
   text = linkifyCitations(text, scope)
   return text
