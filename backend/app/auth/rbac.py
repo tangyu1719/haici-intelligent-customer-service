@@ -51,7 +51,14 @@ def set_user_roles(db: Session, user_id: int, role_codes: list[str]) -> list[str
 
 def list_all_roles(db: Session) -> list[dict]:
     rows = db.query(RbacRole).filter(RbacRole.status == 1).order_by(RbacRole.id).all()
-    return [{"code": r.code, "name": r.name} for r in rows]
+    return [{"id": r.id, "code": r.code, "name": r.name} for r in rows]
+
+
+def user_has_permission(db: Session, user_id: int, permission: str) -> bool:
+    roles = get_user_roles(db, user_id)
+    if "admin" in roles:
+        return True
+    return permission in get_user_permissions(db, user_id)
 
 
 def enforce_api(roles: list[str], path: str, method: str) -> bool:

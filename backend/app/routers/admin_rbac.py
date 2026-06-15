@@ -27,8 +27,16 @@ router = APIRouter(prefix="/admin/rbac", tags=["系统管理-RBAC"])
 
 
 class RoleItem(BaseModel):
+    id: int
     code: str
     name: str
+
+
+class RolePageResponse(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[RoleItem]
 
 
 class UserAdminItem(BaseModel):
@@ -120,7 +128,21 @@ def _to_admin_item(db: Session, user: User, roles: list[str], used: int) -> User
 
 @router.get("/roles", response_model=list[RoleItem])
 def list_roles(_admin: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return list_all_roles(db)
+    return [RoleItem(**r) for r in list_all_roles(db)]
+
+
+@router.get("/roles/page", response_model=RolePageResponse)
+def list_roles_page(
+    qry: ListQuery = Depends(list_query_params),
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    q = db.query(RbacRole).filter(RbacRole.status == 1)
+    q = apply_keyword(q, qry, [RbacRole.code, RbacRole.name])
+    q = apply_sort(q, RbacRole, qry, {"id": RbacRole.id, "code": RbacRole.code}, RbacRole.id)
+    rows, total = paginate(q, qry)
+    items = [RoleItem(id=r.id, code=r.code, name=r.name) for r in rows]
+    return RolePageResponse(**page_result(items, total, qry))
 
 
 # ── 权限模块定义 ───────────────────────────────────────────
@@ -134,6 +156,7 @@ PERMISSION_MODULES: dict[str, dict] = {
     "session": {"label": "会话管理", "icon": "fa-clock", "desc": "对话会话记录", "perms": [
         {"key": "session:view", "label": "查看会话列表"},
         {"key": "session:detail", "label": "查看会话详情与消息历史"},
+        {"key": "session:view:all", "label": "查看全部用户的会话历史（可按用户筛选）"},
     ]},
     "kb": {"label": "知识库管理", "icon": "fa-database", "desc": "知识库文档+向量", "perms": [
         {"key": "kb:view", "label": "查看知识库文档列表"},
@@ -164,7 +187,11 @@ PERMISSION_MODULES: dict[str, dict] = {
         {"key": "system:agent:circuit", "label": "查看熔断监控与恢复"},
     ]},
     "system:rbac": {"label": "权限管理", "icon": "fa-shield-alt", "desc": "角色与权限分配", "perms": [
-        {"key": "system:rbac:users", "label": "查看/管理用户角色和权限"},
+        {"key": "system:rbac:users", "label": "查看/管理用户角色"},
+        {"key": "system:rbac:roles", "label": "配置角色权限（勾选模块权限）"},
+    ]},
+    "system:settings": {"label": "系统设置", "icon": "fa-cog", "desc": "全局运行参数", "perms": [
+        {"key": "system:settings:manage", "label": "管理系统设置（会话落库间隔等）"},
     ]},
 }
 
