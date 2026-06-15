@@ -4,6 +4,7 @@ export const INTENT_LABELS: Record<string, string> = {
   after_sale: '售后问题',
   chitchat: '闲聊',
   complaint: '投诉反馈',
+  faq_cached: 'FAQ 缓存',
 }
 
 export function intentDisplay(code?: string, label?: string): string {
