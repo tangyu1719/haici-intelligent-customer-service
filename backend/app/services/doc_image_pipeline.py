@@ -135,6 +135,11 @@ class ImageProcessResult:
             "flowchart_report": self.flowchart_report,
 
             "overlay_url": self.overlay_url,
+            "is_annotated": bool(
+                self.image_type in ("ui_menu", "flowchart", "chart") or
+                any(kw in (self.vlm_description or "").lower() for kw in
+                    ["区块", "标记", "红框", "箭头", "标注", "编号", "①", "框选"])
+            ),
 
         }
 
@@ -636,22 +641,37 @@ def build_picture_id(result: ImageProcessResult, *, ordinal: int = 0) -> str:
     return f"图-{title}"
 
 
+def _detect_annotations(result: ImageProcessResult) -> bool:
+    """检测图片是否包含标记/红框/编号等，用于提示LLM逐条解释。"""
+    combined = (
+        (result.vlm_description or "") + " " +
+        (result.ocr_text or "") + " " +
+        (extract_description_body(result) or "")
+    ).lower()
+    markers = ["区块(", "标记", "红框", "箭头", "标注", "编号", "①", "②", "③", "④", "⑤",
+               "「", "」", "框选", "高亮", "箭头指向", "注明", "备注"]
+    return any(m in combined for m in markers)
+
+
 def build_rag_image_block(
     result: ImageProcessResult,
     *,
     ordinal: int = 0,
     include_link: bool = True,
 ) -> str:
-    """RAG 切片友好 picture 块：picture_id + 绝对路径 url + description。"""
-    _ = include_link  # 保留参数兼容；url 固定写绝对路径
+    """RAG 切片友好 picture 块：picture_id + url + description + is_annotated。"""
+    _ = include_link
     picture_id = build_picture_id(result, ordinal=ordinal)
     url = str(Path(result.abs_path).resolve()) if result.abs_path else ""
     description = extract_description_body(result)
+    is_annotated = _detect_annotations(result)
     lines = [
         "{picture_id:" + picture_id + ";",
         "url:" + url + ";",
-        "description:",
     ]
+    if is_annotated:
+        lines.append("is_annotated:true;")
+    lines.append("description:")
     if description:
         lines.append(description)
     lines.append("}")

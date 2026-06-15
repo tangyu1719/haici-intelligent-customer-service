@@ -2,9 +2,9 @@
 
 export const PICTURE_BLOCK_DETECT_RE = /\{picture_id\s*:/
 
-/** description 可选：回答里 AI 可只输出 picture_id + url */
+/** description 可选 + is_annotated 可选 */
 export const PICTURE_BLOCK_RE =
-  /\{picture_id\s*:([^;]+);\s*url\s*:([^;]+)(?:;\s*description\s*:([^}]*?))?;?\s*\}/gi
+  /\{picture_id\s*:([^;]+);\s*url\s*:([^;]+)(?:;\s*is_annotated\s*:([^;]+);)?(?:;\s*description\s*:([^}]*?))?;?\s*\}/gi
 
 /** 绝对路径 / output 相对路径 → 前端可访问的 /output/... URL */
 export function absPathToPublicUrl(rawPath: string): string {
