@@ -17,7 +17,8 @@ import ListPagination from '../components/ListPagination.vue'
 import ListQueryBar from '../components/ListQueryBar.vue'
 import MultimodalPanel from '../components/MultimodalPanel.vue'
 import StructuredPanel from '../components/StructuredPanel.vue'
-import RbacAdminPanel from '../components/RbacAdminPanel.vue'
+import RolePermissionsPanel from '../components/RolePermissionsPanel.vue'
+import SystemSettingsPanel from '../components/SystemSettingsPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
 import SessionHistoryPanel from '../components/SessionHistoryPanel.vue'
 import LogManagementPanel from '../components/logs/LogManagementPanel.vue'
@@ -122,7 +123,8 @@ const pageTitle = computed(() => {
     '/admin/gateway-security': '安全合规',
     '/admin/gateway-cache': '缓存管理',
     '/admin/gateway-circuit': '熔断监控',
-    '/admin/rbac': '用户权限',
+    '/admin/rbac': '角色权限',
+    '/admin/system-settings': '系统设置',
     '/admin/feedback': '用户反馈',
     '/admin/sessions': '会话审计',
     '/admin/users': '用户权限',
@@ -619,6 +621,8 @@ onMounted(async () => {
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
       <ChatSessionAdminPanel v-else-if="route.path === '/admin/sessions'" class="flex-1 p-6 overflow-hidden flex flex-col min-h-0" />
       <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
+      <RolePermissionsPanel v-else-if="route.path === '/admin/rbac'" class="flex-1 overflow-y-auto" />
+      <SystemSettingsPanel v-else-if="route.path === '/admin/system-settings'" class="flex-1 overflow-y-auto" />
       <ChatFaqAdminPanel v-else-if="route.path === '/admin/chat-faq'" class="flex-1 p-6 overflow-y-auto" />
       <PipelineSettingsPanel v-else-if="route.path === '/admin/pipeline'" class="flex-1 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
@@ -626,7 +630,6 @@ onMounted(async () => {
       <GatewaySecurityPanel v-else-if="route.path === '/admin/gateway-security'" class="flex-1 overflow-y-auto" />
       <GatewayCachePanel v-else-if="route.path === '/admin/gateway-cache'" class="flex-1 overflow-y-auto" />
       <GatewayCircuitPanel v-else-if="route.path === '/admin/gateway-circuit'" class="flex-1 overflow-y-auto" />
-      <RbacAdminPanel v-else-if="route.path === '/admin/rbac'" class="flex-1 overflow-y-auto" />
 
       <LogManagementPanel v-else-if="route.path.startsWith('/admin/logs/')" :key="adminLogKind" :kind="adminLogKind" class="flex-1 overflow-hidden flex flex-col min-h-0" />
 
