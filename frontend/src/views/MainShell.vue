@@ -1,4 +1,5 @@
 ﻿<script setup lang="ts">
+defineOptions({ name: 'MainShell' })
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authHeaders, clearAuth, currentUser, getAccessToken, hasPerm, isAuthenticated, loadAuthFromStorage, redirectToLogin } from '../api/auth'
@@ -9,7 +10,9 @@ import GatewayPanel from '../components/GatewayPanel.vue'
 import ChatPanel from '../components/ChatPanel.vue'
 import EvalDashboard from '../components/EvalDashboard.vue'
 import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
+import ChatSessionAdminPanel from '../components/ChatSessionAdminPanel.vue'
 import AdminUsersPanel from '../components/AdminUsersPanel.vue'
+import ChatFaqAdminPanel from '../components/ChatFaqAdminPanel.vue'
 import ListPagination from '../components/ListPagination.vue'
 import ListQueryBar from '../components/ListQueryBar.vue'
 import MultimodalPanel from '../components/MultimodalPanel.vue'
@@ -121,7 +124,9 @@ const pageTitle = computed(() => {
     '/admin/gateway-circuit': '熔断监控',
     '/admin/rbac': '用户权限',
     '/admin/feedback': '用户反馈',
+    '/admin/sessions': '会话审计',
     '/admin/users': '用户权限',
+    '/admin/chat-faq': '对话 FAQ',
   }
   return map[route.path] || 'HaiCi 智能客服'
 })
@@ -447,7 +452,7 @@ onMounted(async () => {
         <span class="text-[14px] font-black text-[#363e42]">{{ pageTitle }}</span>
       </header>
 
-      <ChatPanel v-if="route.path === '/chat'" />
+      <ChatPanel v-if="route.path === '/chat'" class="flex-1 flex flex-col overflow-hidden min-h-0" />
 
       <MultimodalPanel v-else-if="route.path === '/multimodal'" />
       <StructuredPanel v-else-if="route.path === '/structured'" />
@@ -612,7 +617,9 @@ onMounted(async () => {
 
       <EvalDashboard v-else-if="route.path === '/admin/eval'" class="flex-1 p-6 overflow-y-auto" />
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
+      <ChatSessionAdminPanel v-else-if="route.path === '/admin/sessions'" class="flex-1 p-6 overflow-hidden flex flex-col min-h-0" />
       <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
+      <ChatFaqAdminPanel v-else-if="route.path === '/admin/chat-faq'" class="flex-1 p-6 overflow-y-auto" />
       <PipelineSettingsPanel v-else-if="route.path === '/admin/pipeline'" class="flex-1 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
       <GatewayPanel v-else-if="route.path === '/admin/agent-gateway'" class="flex-1 overflow-y-auto" />
