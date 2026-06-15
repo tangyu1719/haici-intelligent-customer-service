@@ -8,7 +8,11 @@ export const PICTURE_BLOCK_RE =
 
 /** 绝对路径 / output 相对路径 → 前端可访问的 /output/... URL */
 export function absPathToPublicUrl(rawPath: string): string {
-  const p = String(rawPath || '').trim().replace(/\\/g, '/')
+  let p = String(rawPath || '').trim()
+  // 处理JSON转义的双反斜杠
+  p = p.replace(/\\\\/g, '\\')
+  // Windows路径 → URL
+  p = p.replace(/\\/g, '/')
   if (!p) return ''
   if (p.startsWith('/output/')) return p
   const outIdx = p.toLowerCase().indexOf('/output/')
@@ -17,6 +21,8 @@ export function absPathToPublicUrl(rawPath: string): string {
   if (kbIdx >= 0) return `/output/${p.slice(kbIdx).replace(/^\/+/, '')}`
   const outOnly = p.toLowerCase().indexOf('output/')
   if (outOnly >= 0) return `/${p.slice(outOnly).replace(/^\/+/, '')}`
+  // 兜底：直接返回（可能是相对路径）
+  if (p.startsWith('/')) return p
   return ''
 }
 

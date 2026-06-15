@@ -159,7 +159,7 @@ class LLMWrapper:
 
 
 
-    def call(self, prompt: str, temperature: float = 0.1, max_tokens: int = 512, task_type: str = "qa") -> str:
+    def call(self, prompt: str, temperature: float = 0.1, max_tokens: int = 1024, task_type: str = "qa") -> str:
 
         cache_key = self._get_cache_key(prompt, temperature)
 
