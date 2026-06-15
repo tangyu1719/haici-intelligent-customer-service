@@ -196,6 +196,10 @@ class ChatSession(Base):
 
     status: Mapped[int] = mapped_column(Integer, default=1)
 
+    user_deleted: Mapped[int] = mapped_column(Integer, default=0, index=True)
+
+    user_deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -414,4 +418,20 @@ class SysLogOperationSql(Base):
     cmd_seq: Mapped[int] = mapped_column(Integer, default=0)
     trace_id: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ChatFaq(Base):
+    """对话欢迎区 FAQ：管理员维护的标准问答缓存。"""
+
+    __tablename__ = "chat_faq"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(64), default="通用", index=True)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
