@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
-from app.auth.rbac import enforce_api, get_user_roles
+from app.auth.rbac import enforce_api, get_user_roles, user_has_permission
 from app.auth.security import decode_access_token
 from app.database import get_db
 from app.models import User
@@ -47,6 +47,21 @@ def require_api_permission(
     roles = payload.get("roles") or get_user_roles(db, int(payload["sub"]))
     if not enforce_api(roles, request.url.path, request.method):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "无权限，请向管理员申请权限")
+
+
+def require_permission(permission: str):
+    """校验菜单权限码（admin 角色自动放行）。"""
+
+    def _dep(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        roles = get_user_roles(db, current_user.id)
+        if "admin" in roles or user_has_permission(db, current_user.id, permission):
+            return current_user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限，请向管理员申请权限")
+
+    return _dep
 
 
 def require_admin(
