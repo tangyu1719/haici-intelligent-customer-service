@@ -33,6 +33,18 @@ def rag_metrics(
     return build_rag_metrics(db, limit=limit, days=days)
 
 
+@router.get("/rag-metrics/full-report")
+def rag_full_report(
+    limit: int = Query(100, ge=1, le=500),
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """RAG完整评测报告 — 三层指标+管道可视化+每条指标定义/公式/阈值"""
+    from app.services.rag_eval_service import build_full_eval_report
+    return build_full_eval_report(db, limit=limit, days=days)
+
+
 @router.get("/rag-metrics/report")
 def rag_metrics_report(
     days: int = Query(7, ge=1, le=90),

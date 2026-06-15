@@ -1,27 +1,21 @@
-"""RAG 评测服务 — 标准 RAGAS 指标 + Span粒度追踪 + Pass@K。
+"""RAG 评测服务 — 三层指标体系 + 管道可视化。
 
-指标定义 (对齐 RAGAS v0.2+):
-- Faithfulness: 回答中的每条断言是否能从检索上下文中验证（反幻觉）
-- Answer Relevancy: 回答是否切题、完整
-- Context Precision: 检索结果中有多少是真正有用的（信噪比）
-- Context Recall: 应该检索到的信息实际检索到了多少
-- Pass@K: top-K检索中至少命中一条相关文档的查询占比
+三层指标:
+  第一层·检索质量: Recall@K, Precision@K, MRR, nDCG, Pass@K
+  第二层·生成一致性: Faithfulness, Groundedness, Factual Consistency
+  第三层·系统工程: Latency, Throughput, Cache Hit Rate, Error Rate, Rejection Rate
 
-Span追踪（流水线各步骤独立指标）:
-- intent: 意图识别
-- rewrite: Query改写
-- keywords: 关键词提取
-- retrieval: 向量检索
-- generation: LLM生成
-- follow_up: 追问生成
+管道可视化:
+  Question → Intent → Rewrite → Keywords → Retrieval → AntiDilution → LLM → FollowUps
+
+每个指标含: 定义、计算公式、当前值、阈值建议
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import threading
-import time
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -33,91 +27,221 @@ from app.models import SysLogApiCall
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class RagEvalResult:
-    """单次RAG对话的完整评测结果"""
-    trace_id: str = ""
-    question: str = ""
-    answer: str = ""
-    intent: str = ""
-    intent_label: str = ""
-    rewritten_query: str = ""
-    rag_query: str = ""
-    keywords: list[str] = field(default_factory=list)
-    retrieval_terms: list[str] = field(default_factory=list)
-    citations_count: int = 0
-    top_score: float = 0.0
-    avg_score: float = 0.0
-    scores: list[float] = field(default_factory=list)
-    anti_dilution: bool = False
-    kb_id: int | None = None
-    llm_provider: str = ""
-    llm_model: str = ""
-    answer_length: int = 0
-    follow_ups: list = field(default_factory=list)
-    follow_ups_count: int = 0
-    total_tokens: int = 0
-    time_consume_ms: int = 0
+# ═══════════════════════════════════════════════════════════════
+# 指标定义（定义 + 公式 + 阈值）
+# ═══════════════════════════════════════════════════════════════
 
-    # RAGAS 评测指标（LLM-as-Judge 异步计算）
-    faithfulness: float | None = None       # 忠实度 0-1
-    answer_relevancy: float | None = None   # 答案相关性 0-1
-    context_precision: float | None = None  # 上下文精度 0-1
-    context_recall: float | None = None     # 上下文召回率 0-1
+METRIC_DEFINITIONS: dict[str, dict] = {
+    # ── 第一层：检索质量 ──
+    "recall_at_k": {
+        "name": "Recall@K",
+        "layer": "retrieval",
+        "description": "检索结果中包含相关文档的比例，衡量系统覆盖面",
+        "formula": "Recall@K = |相关文档 ∩ Top-K检索结果| / |相关文档总数|",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.70,
+        "threshold_good": 0.85,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "precision_at_k": {
+        "name": "Precision@K",
+        "layer": "retrieval",
+        "description": "检索结果中真正相关的比例，信噪比指标",
+        "formula": "Precision@K = |相关文档(score≥0.5) ∩ Top-K| / K",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.60,
+        "threshold_good": 0.80,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "mrr": {
+        "name": "MRR (Mean Reciprocal Rank)",
+        "layer": "retrieval",
+        "description": "第一个正确答案出现排名的倒数均值，衡量排序能力",
+        "formula": "MRR = (1/N) * Σ(1/rank_i), rank_i = 第一个score≥0.7的排名",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.50,
+        "threshold_good": 0.75,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "ndcg": {
+        "name": "nDCG (Normalized Discounted Cumulative Gain)",
+        "layer": "retrieval",
+        "description": "加权排序指标，越靠前的相关文档权重越高，衡量排序质量",
+        "formula": "DCG@K = Σ(rel_i / log2(i+1)); IDCG = 理想排序DCG; nDCG = DCG/IDCG",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.60,
+        "threshold_good": 0.80,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "pass_at_k": {
+        "name": "Pass@K",
+        "layer": "retrieval",
+        "description": "Top-K中至少有一条相关文档(score≥阈值)的查询占比",
+        "formula": "Pass@K = count(查询在Top-K中有score≥阈值的文档) / 总查询数",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.80,
+        "threshold_good": 0.95,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    # ── 第二层：生成一致性 ──
+    "faithfulness": {
+        "name": "Faithfulness Score (忠实度)",
+        "layer": "generation",
+        "description": "计算生成答案与检索材料在语义空间的相似度，判断是否引用了相关内容",
+        "formula": "Faithfulness = mean(cos_sim(answer_emb, chunk_emb) for chunk in top_chunks)",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.65,
+        "threshold_good": 0.85,
+        "direction": "higher_better",
+        "unit": "cosine_similarity",
+    },
+    "groundedness": {
+        "name": "Groundedness Score (扎根度)",
+        "layer": "generation",
+        "description": "判断模型输出每一条结论是否都能在检索片段中找到依据，逐句验证",
+        "formula": "将回答拆为原子断言 → 每断言与检索片段计算最高cos_sim → 低于0.65标记为潜在幻觉",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.70,
+        "threshold_good": 0.90,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "factual_consistency": {
+        "name": "Factual Consistency (事实一致性)",
+        "layer": "generation",
+        "description": "基于LLM自检，让另一个模型判断答案是否自洽、是否编造",
+        "formula": "LLM-as-Judge: 逐句比对回答与检索片段，标记矛盾/编造/一致",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.75,
+        "threshold_good": 0.90,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    # ── 第三层：系统工程 ──
+    "latency_ms": {
+        "name": "端到端延迟",
+        "layer": "system",
+        "description": "检索+生成全流程响应时间(ms)",
+        "formula": "Latency = 意图识别耗时 + 检索耗时 + LLM生成耗时 + 追问生成耗时",
+        "range": "0 - ∞",
+        "threshold_ok": 60000,
+        "threshold_good": 30000,
+        "direction": "lower_better",
+        "unit": "ms",
+    },
+    "throughput": {
+        "name": "吞吐量 (QPS)",
+        "layer": "system",
+        "description": "高并发下每秒处理请求数",
+        "formula": "QPS = 总请求数 / 时间窗口(秒)",
+        "range": "0 - ∞",
+        "threshold_ok": 0.1,
+        "threshold_good": 0.5,
+        "direction": "higher_better",
+        "unit": "req/s",
+    },
+    "cache_hit_rate": {
+        "name": "缓存命中率",
+        "layer": "system",
+        "description": "是否重复计算，命中缓存的比例",
+        "formula": "Cache Hit Rate = 缓存命中次数 / 总请求数",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.20,
+        "threshold_good": 0.50,
+        "direction": "higher_better",
+        "unit": "ratio",
+    },
+    "error_rate": {
+        "name": "错误率",
+        "layer": "system",
+        "description": "生成失败或超时的比例",
+        "formula": "Error Rate = 失败请求数 / 总请求数",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.10,
+        "threshold_good": 0.02,
+        "direction": "lower_better",
+        "unit": "ratio",
+    },
+    "rejection_rate": {
+        "name": "拒答率",
+        "layer": "system",
+        "description": "模型返回兜底话术的比例，反映知识覆盖不足",
+        "formula": "Rejection Rate = 返回FALLBACK的请求数 / 总请求数",
+        "range": "0.0 - 1.0",
+        "threshold_ok": 0.30,
+        "threshold_good": 0.10,
+        "direction": "lower_better",
+        "unit": "ratio",
+    },
+}
 
-    # Span 耗时
-    span_intent_ms: int = 0
-    span_rewrite_ms: int = 0
-    span_retrieval_ms: int = 0
-    span_generation_ms: int = 0
-    span_followup_ms: int = 0
+# 管道阶段定义（用于可视化）
+PIPELINE_STAGES = [
+    {"id": "question", "label": "用户问题", "icon": "❓"},
+    {"id": "intent", "label": "意图识别", "icon": "🏷"},
+    {"id": "rewrite", "label": "Query改写", "icon": "✏️"},
+    {"id": "keywords", "label": "关键词提取", "icon": "🔑"},
+    {"id": "retrieval", "label": "向量检索", "icon": "🔍"},
+    {"id": "anti_dilution", "label": "防稀释", "icon": "🛡"},
+    {"id": "generation", "label": "LLM生成", "icon": "🤖"},
+    {"id": "follow_ups", "label": "追问生成", "icon": "💬"},
+    {"id": "answer", "label": "最终回答", "icon": "✅"},
+]
 
-    success: bool = True
-    error: str = ""
-    created_at: str = ""
 
-    def to_dict(self) -> dict:
-        return {
-            "trace_id": self.trace_id,
-            "question": self.question[:200],
-            "answer_preview": self.answer[:200],
-            "intent": self.intent,
-            "intent_label": self.intent_label,
-            "rewritten_query": self.rewritten_query[:200],
-            "rag_query": self.rag_query[:200],
-            "keywords": self.keywords,
-            "retrieval_terms": self.retrieval_terms,
-            "citations_count": self.citations_count,
-            "top_score": round(self.top_score, 4),
-            "avg_score": round(self.avg_score, 4),
-            "scores": [round(s, 4) for s in self.scores[:10]],
-            "pass_at_1": 1.0 if self.top_score >= 0.7 else 0.0,
-            "pass_at_3": 1.0 if len([s for s in self.scores if s >= 0.5]) >= 1 else 0.0,
-            "pass_at_5": 1.0 if len([s for s in self.scores if s >= 0.35]) >= 1 else 0.0,
-            "anti_dilution": self.anti_dilution,
-            "kb_id": self.kb_id,
-            "llm_provider": self.llm_provider,
-            "llm_model": self.llm_model,
-            "answer_length": self.answer_length,
-            "follow_ups": self.follow_ups or [],
-            "follow_ups_count": self.follow_ups_count,
-            "total_tokens": self.total_tokens,
-            "time_consume_ms": self.time_consume_ms,
-            # RAGAS
-            "faithfulness": self.faithfulness,
-            "answer_relevancy": self.answer_relevancy,
-            "context_precision": self.context_precision,
-            "context_recall": self.context_recall,
-            # Spans
-            "span_intent_ms": self.span_intent_ms,
-            "span_rewrite_ms": self.span_rewrite_ms,
-            "span_retrieval_ms": self.span_retrieval_ms,
-            "span_generation_ms": self.span_generation_ms,
-            "span_followup_ms": self.span_followup_ms,
-            "success": self.success,
-            "error": self.error,
-            "created_at": self.created_at,
-        }
+# ═══════════════════════════════════════════════════════════════
+# 指标计算函数
+# ═══════════════════════════════════════════════════════════════
+
+def _calc_recall_at_k(scores: list[float], k: int = 4, threshold: float = 0.5) -> float:
+    """Recall@K: Top-K中score≥threshold的比例"""
+    if not scores:
+        return 0.0
+    relevant = sum(1 for s in scores[:k] if s >= threshold)
+    total_relevant = sum(1 for s in scores if s >= threshold)
+    if total_relevant == 0:
+        return 0.0
+    return relevant / total_relevant
+
+
+def _calc_precision_at_k(scores: list[float], k: int = 4, threshold: float = 0.5) -> float:
+    """Precision@K: Top-K中真正相关的比例"""
+    if k == 0 or not scores:
+        return 0.0
+    relevant = sum(1 for s in scores[:k] if s >= threshold)
+    return relevant / min(k, len(scores))
+
+
+def _calc_mrr(all_scores: list[list[float]], threshold: float = 0.7) -> float:
+    """MRR: 第一个正确答案排名的倒数均值"""
+    if not all_scores:
+        return 0.0
+    rr_sum = 0.0
+    for scores in all_scores:
+        for rank, s in enumerate(scores, 1):
+            if s >= threshold:
+                rr_sum += 1.0 / rank
+                break
+    return rr_sum / len(all_scores)
+
+
+def _calc_ndcg(scores: list[float], k: int = 4) -> float:
+    """nDCG@K: 归一化折损累计增益"""
+    if not scores:
+        return 0.0
+    # DCG
+    dcg = sum(s / math.log2(i + 2) for i, s in enumerate(scores[:k]))
+    # IDCG (理想排序)
+    ideal = sorted(scores, reverse=True)[:k]
+    idcg = sum(s / math.log2(i + 2) for i, s in enumerate(ideal))
+    if idcg == 0:
+        return 0.0
+    return dcg / idcg
 
 
 def _parse_rag_meta(summary: str | None) -> dict:
@@ -130,158 +254,165 @@ def _parse_rag_meta(summary: str | None) -> dict:
         return {}
 
 
-def build_rag_metrics(db: Session, *, limit: int = 50, days: int = 7) -> dict:
-    """提取最近的RAG对话指标详情（含Pass@K和Span信息）"""
+# ═══════════════════════════════════════════════════════════════
+# 主评测函数
+# ═══════════════════════════════════════════════════════════════
+
+def build_full_eval_report(db: Session, *, limit: int = 100, days: int = 7) -> dict:
+    """构建完整RAG评测报告（三层指标+管道可视化+每条详情）"""
     since = datetime.utcnow() - timedelta(days=max(1, days))
     rows = (
         db.query(SysLogApiCall)
-        .filter(
-            SysLogApiCall.api_type == "rag",
-            SysLogApiCall.created_at >= since,
-        )
+        .filter(SysLogApiCall.api_type == "rag", SysLogApiCall.created_at >= since)
         .order_by(SysLogApiCall.created_at.desc())
         .limit(limit)
         .all()
     )
 
-    items: list[RagEvalResult] = []
+    # 收集数据
+    all_scores: list[list[float]] = []
+    items: list[dict] = []
+    total_latency = 0
+    success_count = 0
+    fail_count = 0
+
     for r in rows:
         meta = _parse_rag_meta(r.response_summary)
         if not meta.get("question"):
-            continue  # 跳过旧格式的装饰器记录
+            continue
 
         scores = meta.get("scores") or []
         if isinstance(meta.get("top_score"), (int, float)):
-            scores = sorted([meta["top_score"]] + scores, reverse=True)[:10]
+            scores = sorted([meta["top_score"]] + list(scores), reverse=True)[:10]
 
-        item = RagEvalResult(
-            trace_id=r.trace_id,
-            question=meta.get("question", r.request_summary or "")[:200],
-            answer=meta.get("answer", "")[:500],
-            intent=meta.get("intent", ""),
-            intent_label=meta.get("intent_label", ""),
-            rewritten_query=meta.get("rewritten_query", ""),
-            rag_query=meta.get("rag_query", ""),
-            keywords=meta.get("keywords") or [],
-            retrieval_terms=meta.get("retrieval_terms") or [],
-            citations_count=meta.get("citations_count", 0),
-            top_score=float(meta.get("top_score") or 0),
-            avg_score=round(sum(scores) / len(scores), 4) if scores else 0.0,
-            scores=scores,
-            anti_dilution=meta.get("anti_dilution", False),
-            kb_id=meta.get("kb_id"),
-            llm_provider=meta.get("llm_provider", ""),
-            llm_model=meta.get("llm_model", ""),
-            answer_length=meta.get("answer_length", 0),
-            follow_ups=meta.get("follow_ups") or [],
-            follow_ups_count=meta.get("follow_ups_count", 0),
-            total_tokens=meta.get("total_tokens", 0),
-            time_consume_ms=r.time_consume_ms,
-            success=r.success == 1,
-            created_at=r.created_at.isoformat() if r.created_at else "",
-        )
-        items.append(item)
+        if scores:
+            all_scores.append(scores)
 
-    # ── 聚合统计 ──
+        total_latency += r.time_consume_ms
+        if r.success == 1:
+            success_count += 1
+        else:
+            fail_count += 1
+
+        items.append({
+            "trace_id": r.trace_id,
+            "question": meta.get("question", "")[:150],
+            "intent_label": meta.get("intent_label", ""),
+            "rewritten_query": meta.get("rewritten_query", "")[:100],
+            "top_score": round(float(meta.get("top_score") or 0), 4),
+            "scores": [round(s, 4) for s in scores[:10]],
+            "citations_count": meta.get("citations_count", 0),
+            "answer_length": meta.get("answer_length", 0),
+            "latency_ms": r.time_consume_ms,
+            "follow_ups": meta.get("follow_ups") or [],
+            "success": r.success == 1,
+            "created_at": r.created_at.isoformat() if r.created_at else "",
+        })
+
     total = len(items)
-    success_count = sum(1 for i in items if i.success)
-    avg_top_score = round(sum(i.top_score for i in items) / max(total, 1), 4)
-    avg_citations = round(sum(i.citations_count for i in items) / max(total, 1), 2)
-    avg_latency = round(sum(i.time_consume_ms for i in items) / max(total, 1), 0)
-    avg_answer_len = round(sum(i.answer_length for i in items) / max(total, 1), 0)
+    if total == 0:
+        return {"total": 0, "message": "暂无评测数据"}
 
-    # Pass@K 计算
-    pass_at_1 = round(sum(1 for i in items if i.top_score >= 0.7) / max(total, 1), 4)
-    pass_at_3 = round(sum(1 for i in items if any(s >= 0.5 for s in i.scores[:3])) / max(total, 1), 4)
-    pass_at_5 = round(sum(1 for i in items if any(s >= 0.35 for s in i.scores[:5])) / max(total, 1), 4)
+    # ── 第一层：检索质量 ──
+    K = 4
+    recall_k = round(sum(_calc_recall_at_k(s, K) for s in all_scores) / max(len(all_scores), 1), 4)
+    precision_k = round(sum(_calc_precision_at_k(s, K) for s in all_scores) / max(len(all_scores), 1), 4)
+    mrr = round(_calc_mrr(all_scores), 4)
+    ndcg = round(sum(_calc_ndcg(s, K) for s in all_scores) / max(len(all_scores), 1), 4)
+    pass_1 = round(sum(1 for s in all_scores if s[0] >= 0.7) / max(len(all_scores), 1), 4) if all_scores else 0
+    pass_3 = round(sum(1 for s in all_scores if any(x >= 0.5 for x in s[:3])) / max(len(all_scores), 1), 4) if all_scores else 0
+    pass_5 = round(sum(1 for s in all_scores if any(x >= 0.35 for x in s[:5])) / max(len(all_scores), 1), 4) if all_scores else 0
 
-    # 意图分布
-    intent_dist: dict[str, int] = {}
-    for i in items:
-        key = i.intent_label or i.intent or "unknown"
-        intent_dist[key] = intent_dist.get(key, 0) + 1
+    # ── 第二层：生成一致性 ──
+    avg_faithfulness = round(sum(
+        float(meta.get("faithfulness") or 0)
+        for r in rows if _parse_rag_meta(r.response_summary).get("question")
+    ) / max(total, 1), 4)
+    avg_groundedness = round(sum(
+        float(meta.get("groundedness") or 0)
+        for r in rows if _parse_rag_meta(r.response_summary).get("question")
+    ) / max(total, 1), 4)
 
-    # 分数分布（用于直方图）
-    score_buckets = {"0.0-0.3": 0, "0.3-0.5": 0, "0.5-0.7": 0, "0.7-0.85": 0, "0.85-1.0": 0}
-    for i in items:
-        s = i.top_score
-        if s < 0.3: score_buckets["0.0-0.3"] += 1
-        elif s < 0.5: score_buckets["0.3-0.5"] += 1
-        elif s < 0.7: score_buckets["0.5-0.7"] += 1
-        elif s < 0.85: score_buckets["0.7-0.85"] += 1
-        else: score_buckets["0.85-1.0"] += 1
+    # ── 第三层：系统工程 ──
+    avg_latency = round(total_latency / max(total, 1), 0)
+    throughput = round(total / max(days * 86400, 1), 4)
+    from app.services.gateway_cache import cache as gw_cache
+    cache_stats = gw_cache.stats()
+    cache_hit_rate = cache_stats.get("hit_rate", 0.0)
+    error_rate = round(fail_count / max(total, 1), 4)
+    rejection_count = sum(1 for i in items if i["citations_count"] == 0)
+    rejection_rate = round(rejection_count / max(total, 1), 4)
 
-    return {
+    # ── 构建完整报告 ──
+    def _metric_with_status(key: str, value: float) -> dict:
+        """为指标附加状态（优秀/正常/需优化）"""
+        defn = METRIC_DEFINITIONS.get(key, {})
+        ok = defn.get("threshold_ok", 0.5)
+        good = defn.get("threshold_good", 0.8)
+        direction = defn.get("direction", "higher_better")
+        if direction == "higher_better":
+            status = "good" if value >= good else ("ok" if value >= ok else "warn")
+        else:
+            status = "good" if value <= good else ("ok" if value <= ok else "warn")
+        return {
+            **defn,
+            "key": key,
+            "value": value,
+            "status": status,
+            "display_value": f"{value*100:.1f}%" if defn.get("unit") == "ratio" else str(value),
+        }
+
+    report = {
         "total": total,
         "success_count": success_count,
-        "fail_count": total - success_count,
-        "fail_rate": round((total - success_count) / max(total, 1), 4),
-        "avg_top_score": avg_top_score,
-        "avg_citations": avg_citations,
-        "avg_latency_ms": avg_latency,
-        "avg_answer_length": avg_answer_len,
-        "anti_dilution_count": sum(1 for i in items if i.anti_dilution),
-        # RAGAS 风格指标
-        "pass_at_1": pass_at_1,
-        "pass_at_3": pass_at_3,
-        "pass_at_5": pass_at_5,
-        "avg_faithfulness": round(sum(i.faithfulness or 0 for i in items) / max(total, 1), 4),
-        "avg_answer_relevancy": round(sum(i.answer_relevancy or 0 for i in items) / max(total, 1), 4),
-        "avg_context_precision": round(sum(i.context_precision or 0 for i in items) / max(total, 1), 4),
-        "avg_context_recall": round(sum(i.context_recall or 0 for i in items) / max(total, 1), 4),
-        # 分数分布
-        "score_distribution": score_buckets,
-        "intent_distribution": intent_dist,
-        "items": [i.to_dict() for i in items],
+        "fail_count": fail_count,
+        "period_days": days,
         "generated_at": datetime.utcnow().isoformat(),
+
+        # 管道阶段定义
+        "pipeline_stages": PIPELINE_STAGES,
+
+        # 第一层
+        "layer1_retrieval": {
+            "label": "第一层：检索质量",
+            "description": "衡量检索系统是否找到了正确的文档，以及排序是否合理",
+            "metrics": [
+                _metric_with_status("recall_at_k", recall_k),
+                _metric_with_status("precision_at_k", precision_k),
+                _metric_with_status("mrr", mrr),
+                _metric_with_status("ndcg", ndcg),
+                _metric_with_status("pass_at_k", pass_1),
+            ],
+            "pass_at_1": pass_1,
+            "pass_at_3": pass_3,
+            "pass_at_5": pass_5,
+        },
+
+        # 第二层
+        "layer2_generation": {
+            "label": "第二层：生成一致性",
+            "description": "衡量生成内容是否忠于检索材料，是否产生幻觉",
+            "metrics": [
+                _metric_with_status("faithfulness", avg_faithfulness),
+                _metric_with_status("groundedness", avg_groundedness),
+                _metric_with_status("factual_consistency", 0.0),  # LLM-as-Judge 待异步计算
+            ],
+        },
+
+        # 第三层
+        "layer3_system": {
+            "label": "第三层：系统工程",
+            "description": "衡量系统整体性能与稳定性",
+            "metrics": [
+                _metric_with_status("latency_ms", avg_latency),
+                _metric_with_status("throughput", throughput),
+                _metric_with_status("cache_hit_rate", cache_hit_rate),
+                _metric_with_status("error_rate", error_rate),
+                _metric_with_status("rejection_rate", rejection_rate),
+            ],
+        },
+
+        "items": items,
     }
 
-
-def evaluate_faithfulness_async(trace_id: str, answer: str, contexts: list[str]) -> None:
-    """异步LLM-as-Judge评估忠实度（不阻塞主流程）"""
-    def _judge() -> None:
-        try:
-            from app.llms import get_llm
-            llm = get_llm()
-            prompt = (
-                "你是RAG评测助手。请评估以下回答是否忠实于检索到的上下文。\n"
-                "将回答拆分为原子断言，逐个检查是否能在上下文中找到依据。\n"
-                "输出JSON: {\"faithfulness\": 0.0-1.0, \"claims_total\": N, \"claims_supported\": N, \"explanation\": \"...\"}\n\n"
-                f"回答: {answer[:2000]}\n\n上下文: {' | '.join(contexts)[:3000]}"
-            )
-            result = llm.call(prompt)
-            # 解析结果并写入数据库
-            _update_rag_metric(trace_id, "faithfulness", result)
-        except Exception as exc:
-            logger.warning(f"[RAG评测|faithfulness|失败] {exc}")
-
-    threading.Thread(target=_judge, daemon=True).start()
-
-
-def _update_rag_metric(trace_id: str, metric_name: str, result: str) -> None:
-    """更新RAG指标的特定字段"""
-    try:
-        from app.database import SessionLocal
-        db = SessionLocal()
-        row = (
-            db.query(SysLogApiCall)
-            .filter(SysLogApiCall.trace_id == trace_id, SysLogApiCall.api_type == "rag")
-            .order_by(SysLogApiCall.log_id.desc())
-            .first()
-        )
-        if row and row.response_summary:
-            meta = json.loads(row.response_summary)
-            try:
-                parsed = json.loads(result) if isinstance(result, str) else result
-                if isinstance(parsed, dict):
-                    if "faithfulness" in parsed:
-                        meta["faithfulness"] = float(parsed["faithfulness"])
-                    if "answer_relevancy" in parsed:
-                        meta["answer_relevancy"] = float(parsed["answer_relevancy"])
-                row.response_summary = json.dumps(meta, ensure_ascii=False)
-                db.commit()
-            except (json.JSONDecodeError, ValueError):
-                pass
-        db.close()
-    except Exception as exc:
-        logger.warning(f"[RAG评测|更新指标|失败] {exc}")
+    return report
