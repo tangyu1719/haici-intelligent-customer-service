@@ -1,14 +1,18 @@
-"""会话持久化：列表、详情、创建、编辑、归档。"""
+"""会话持久化：列表、详情、创建、编辑、用户侧软删除。"""
 
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.auth.rbac import user_has_permission
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import ChatMessage, ChatSession, User
@@ -21,6 +25,7 @@ from app.schemas import (
     SessionPageResponse,
     SessionUpdateRequest,
 )
+from app.services.chat_session_store import sync_active_session_async
 from app.services.list_query import (
     ListQuery,
     apply_date_range,
@@ -32,6 +37,8 @@ from app.services.list_query import (
     page_result,
     paginate,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["会话"])
 
@@ -50,10 +57,11 @@ def _meta_summary(raw: dict | None, message_count: int = 0) -> SessionMetaSummar
         message_count=int(data.get("message_count") or message_count or 0),
         note=data.get("note"),
         pinned=bool(data.get("pinned")),
+        streaming=bool(data.get("streaming")),
     )
 
 
-def _session_item(session: ChatSession, message_count: int) -> SessionListItem:
+def _session_item(session: ChatSession, message_count: int, user: User | None = None) -> SessionListItem:
     return SessionListItem(
         id=session.id,
         context_id=session.context_id,
@@ -62,6 +70,45 @@ def _session_item(session: ChatSession, message_count: int) -> SessionListItem:
         updated_at=session.updated_at,
         message_count=message_count,
         meta=_meta_summary(session.meta_json, message_count),
+        user_id=int(session.user_id) if session.user_id else None,
+        username=user.username if user else None,
+        nickname=user.nickname if user else None,
+        user_no=user.user_no if user else None,
+    )
+
+
+def _can_view_all_sessions(db: Session, user: User) -> bool:
+    return user_has_permission(db, user.id, "session:view:all")
+
+
+def _accessible_session(
+    db: Session,
+    session_id: int,
+    current_user: User,
+    *,
+    active_only: bool = True,
+) -> ChatSession:
+    session = db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.user_id == current_user.id:
+        if active_only:
+            if session.user_deleted_at is not None:
+                raise HTTPException(status_code=404, detail="会话已删除")
+            if session.status != 1:
+                raise HTTPException(status_code=404, detail="会话不可用")
+        return session
+    if _can_view_all_sessions(db, current_user):
+        return session
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+def _user_visible_session_filter(q):
+    """用户可见：未软删且状态正常。"""
+    return q.filter(
+        ChatSession.user_deleted == 0,
+        ChatSession.user_deleted_at.is_(None),
+        ChatSession.status == 1,
     )
 
 
@@ -69,8 +116,11 @@ def _owned_session(db: Session, session_id: int, user_id: int, *, active_only: b
     session = db.get(ChatSession, session_id)
     if not session or session.user_id != user_id:
         raise HTTPException(status_code=404, detail="会话不存在")
-    if active_only and session.status != 1:
-        raise HTTPException(status_code=404, detail="会话已归档")
+    if active_only:
+        if session.user_deleted == 1 or session.user_deleted_at is not None:
+            raise HTTPException(status_code=404, detail="会话已删除")
+        if session.status != 1:
+            raise HTTPException(status_code=404, detail="会话不可用")
     return session
 
 
@@ -115,37 +165,57 @@ def create_session(db: Session = Depends(get_db), current_user: User = Depends(g
 @router.get("", response_model=SessionPageResponse)
 def list_sessions(
     qry: ListQuery = Depends(list_query_params),
+    user_id: int | None = Query(None, description="筛选指定用户（需 session:view:all 权限）"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    view_all = _can_view_all_sessions(db, current_user)
     msg_counts = (
         db.query(ChatMessage.session_id.label("sid"), func.count(ChatMessage.id).label("message_count"))
         .group_by(ChatMessage.session_id)
         .subquery()
     )
     q = (
-        db.query(ChatSession, func.coalesce(msg_counts.c.message_count, 0).label("message_count"))
+        db.query(
+            ChatSession,
+            func.coalesce(msg_counts.c.message_count, 0).label("message_count"),
+            User,
+        )
         .outerjoin(msg_counts, ChatSession.id == msg_counts.c.sid)
-        .filter(ChatSession.user_id == current_user.id, ChatSession.status == 1)
+        .outerjoin(User, User.id == ChatSession.user_id)
     )
+    if view_all:
+        q = q.filter(ChatSession.status == 1)
+        if user_id is not None:
+            q = q.filter(ChatSession.user_id == user_id)
+    else:
+        q = q.filter(ChatSession.user_id == current_user.id)
+        q = _user_visible_session_filter(q)
     q = apply_id_filter(q, ChatSession.id, qry)
     if qry.name:
-        q = apply_like(q, ChatSession.title, qry.name)
+        if view_all:
+            q = q.filter(
+                (ChatSession.title.ilike(f"%{qry.name}%"))
+                | (User.username.ilike(f"%{qry.name}%"))
+                | (User.nickname.ilike(f"%{qry.name}%"))
+                | (User.user_no.ilike(f"%{qry.name}%"))
+            )
+        else:
+            q = apply_like(q, ChatSession.title, qry.name)
     q = apply_keyword(q, qry, [ChatSession.title, ChatSession.context_id])
     q = apply_date_range(q, ChatSession.updated_at, qry)
-    sort_map = {**_SESSION_SORT, "message_count": msg_counts.c.message_count}
+    sort_map = {**_SESSION_SORT, "message_count": msg_counts.c.message_count, "user_id": ChatSession.user_id}
     q = apply_sort(q, ChatSession, qry, sort_map, ChatSession.updated_at)
     rows, total = paginate(q, qry)
-    items = [_session_item(session, int(message_count or 0)) for session, message_count in rows]
+    items = [_session_item(session, int(message_count or 0), user) for session, message_count, user in rows]
     return SessionPageResponse(**page_result(items, total, qry))
 
 
 @router.get("/{session_id}", response_model=SessionDetailResponse)
 def get_session_detail(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    session = _owned_session(db, session_id, current_user.id)
+    session = _accessible_session(db, session_id, current_user)
     msg_count = db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == session_id).scalar() or 0
     base = _session_item(session, int(msg_count))
-    # 详情默认带最近 50 条消息（时间正序）；完整翻页走 /messages
     msg_qry = ListQuery(page=1, size=50, sort_by="created_at", sort_order="asc")
     mq = _messages_query(db, session_id, msg_qry)
     rows, _ = paginate(mq, msg_qry)
@@ -197,8 +267,26 @@ def update_session(
 
 
 @router.delete("/{session_id}")
-def archive_session(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def user_delete_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """用户界面删除（软删）：从智能对话/会话历史隐藏，消息与审计记录保留。"""
     session = _owned_session(db, session_id, current_user.id)
-    session.status = 0
+    if session.meta_json and isinstance(session.meta_json, dict) and session.meta_json.get("streaming"):
+        raise HTTPException(status_code=409, detail="该会话正在生成回答，请稍候再删除")
+    session.user_deleted = 1
+    session.user_deleted_at = datetime.utcnow()
     db.commit()
-    return {"ok": True, "id": session_id, "archived": True}
+    logger.info(
+        "[会话持久化|sessions.user_delete|session_id=%s|硬编执行|完成] user_id=%s",
+        session_id,
+        current_user.id,
+    )
+    return {
+        "ok": True,
+        "id": session_id,
+        "user_deleted": True,
+        "message": "已从您的界面隐藏，管理员审计记录仍保留",
+    }

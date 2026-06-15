@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func
@@ -38,7 +39,7 @@ def _persist_user_message_sync(
     db = SessionLocal()
     try:
         sess = db.get(ChatSession, session_id)
-        if not sess or sess.user_id != user_id or sess.status != 1:
+        if not sess or sess.user_id != user_id or sess.status != 1 or getattr(sess, "user_deleted", 0) == 1:
             return None
         msg = ChatMessage(session_id=session_id, role="user", content=question, intent_label=intent)
         db.add(msg)
@@ -76,7 +77,7 @@ def _persist_assistant_message_sync(
     db = SessionLocal()
     try:
         sess = db.get(ChatSession, session_id)
-        if not sess or sess.user_id != user_id or sess.status != 1:
+        if not sess or sess.user_id != user_id or sess.status != 1 or getattr(sess, "user_deleted", 0) == 1:
             return None
         msg = ChatMessage(
             session_id=session_id,
@@ -107,12 +108,49 @@ def _persist_assistant_message_sync(
         db.close()
 
 
+def _sync_active_session_sync(*, session_id: int, user_id: int, reason: str = "interval") -> bool:
+    """活跃会话定时/退出落库：刷新 meta 与 updated_at，供会话历史查询。"""
+    db = SessionLocal()
+    try:
+        sess = db.get(ChatSession, session_id)
+        if not sess or sess.user_id != user_id or sess.status != 1 or getattr(sess, "user_deleted", 0) == 1:
+            return False
+        meta = dict(sess.meta_json or {})
+        meta["last_persist_at"] = datetime.utcnow().isoformat()
+        meta["last_persist_reason"] = reason
+        sess.meta_json = meta
+        flag_modified(sess, "meta_json")
+        touch_session_meta(db, sess)
+        sess.updated_at = datetime.utcnow()
+        db.commit()
+        logger.info(
+            "[智能客服-会话持久化|chat_session_store|sync_active|硬编执行|完成] session_id=%s; reason=%s",
+            session_id,
+            reason,
+        )
+        return True
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "[智能客服-会话持久化|chat_session_store|sync_active|硬编执行|失败] session_id=%s; error_type=%s",
+            session_id,
+            type(exc).__name__,
+        )
+        return False
+    finally:
+        db.close()
+
+
 async def persist_user_message_async(**kwargs: Any) -> int | None:
     return await asyncio.to_thread(_persist_user_message_sync, **kwargs)
 
 
 async def persist_assistant_message_async(**kwargs: Any) -> int | None:
     return await asyncio.to_thread(_persist_assistant_message_sync, **kwargs)
+
+
+async def sync_active_session_async(**kwargs: Any) -> bool:
+    return await asyncio.to_thread(_sync_active_session_sync, **kwargs)
 
 
 def schedule_persist_user(**kwargs: Any) -> asyncio.Task:
@@ -123,3 +161,38 @@ def schedule_persist_user(**kwargs: Any) -> asyncio.Task:
 def schedule_persist_assistant(**kwargs: Any) -> asyncio.Task:
     """后台异步落库助手消息，不阻塞 SSE。"""
     return asyncio.create_task(persist_assistant_message_async(**kwargs))
+
+
+def _set_session_streaming_sync(*, session_id: int, user_id: int, streaming: bool) -> None:
+    """标记会话是否正在后台生成回答（供前端轮询恢复）。"""
+    db = SessionLocal()
+    try:
+        sess = db.get(ChatSession, session_id)
+        if not sess or sess.user_id != user_id or sess.status != 1 or getattr(sess, "user_deleted", 0) == 1:
+            return
+        meta = dict(sess.meta_json or {})
+        if streaming:
+            meta["streaming"] = True
+        else:
+            meta.pop("streaming", None)
+        sess.meta_json = meta
+        flag_modified(sess, "meta_json")
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "[智能客服-会话持久化|chat_session_store|set_streaming|硬编执行|失败] session_id=%s; error_type=%s",
+            session_id,
+            type(exc).__name__,
+        )
+    finally:
+        db.close()
+
+
+async def set_session_streaming(*, session_id: int, user_id: int, streaming: bool) -> None:
+    await asyncio.to_thread(
+        _set_session_streaming_sync,
+        session_id=session_id,
+        user_id=user_id,
+        streaming=streaming,
+    )
