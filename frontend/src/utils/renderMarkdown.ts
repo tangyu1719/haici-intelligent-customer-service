@@ -72,7 +72,7 @@ export function linkifyCitations(text: string, messageScope?: string | number): 
 
   // 中文或括号后直接跟引用号：模块2,3,4。
   out = out.replace(
-    /([\u4e00-\u9fff）)」』"\u201d])(\d{1,2}(?:[,、，]\s*\d{1,2})*)(?=[。，,.；;!！?？\n\r)\]）]|$)/gm,
+    /([\u4e00-\u9fff）)」』"\u201d])(\d{1,2}(?:[,、，]\s*\d{1,2})*)(?=[。，,.；;!！?？\n\r)\]）]|\s|$)/gm,
     (_m, before: string, seq: string) => `${before}${expandCommaCiteSeq(seq, scope)}`,
   )
 
