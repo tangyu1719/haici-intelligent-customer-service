@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { authHeaders, getAccessToken } from '../api/auth'
 import { fixDisplayFilename } from '../utils/filename'
+import MultimodalTaskHistoryModal from './MultimodalTaskHistoryModal.vue'
 
 const uploadFiles = ref<File[]>([])
 const uploadBusy = ref(false)
@@ -28,6 +29,8 @@ interface TaskItem {
 interface LogEntry { timestamp: string; level: string; message: string }
 
 const tasks = ref<TaskItem[]>([])
+const ACTIVE_TASK_LIMIT = 5
+const showHistoryModal = ref(false)
 const detailTaskId = ref('')
 const detailTask = ref<TaskItem | null>(null)
 const detailLogs = ref<LogEntry[]>([])
@@ -53,6 +56,18 @@ const S_COLOR: Record<string, string> = {
 }
 
 const displayName = (name: string) => fixDisplayFilename(name)
+
+const isActiveStatus = (status: string) => status === 'pending' || status === 'running'
+const isHistoryStatus = (status: string) => status === 'completed' || status === 'failed'
+
+const activeTasks = computed(() =>
+  tasks.value
+    .filter((t) => isActiveStatus(t.status))
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, ACTIVE_TASK_LIMIT),
+)
+
+const historyCount = computed(() => tasks.value.filter((t) => isHistoryStatus(t.status)).length)
 
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
@@ -120,8 +135,7 @@ async function startUpload() {
       (uploadMsg.value ? '\n' + uploadMsg.value : '')
     await loadTasks()
     if (lastTaskId) {
-      await loadDetail(lastTaskId)
-      connectSSE(lastTaskId)
+      await selectTask(lastTaskId)
     }
   } else if (!uploadMsg.value) {
     uploadMsg.value = '提交失败，请重试'
@@ -212,6 +226,12 @@ function fmt(s: string) {
   if (!s) return ''
   return new Date(s).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+async function selectTask(taskId: string) {
+  await loadDetail(taskId)
+  const t = tasks.value.find((x) => x.task_id === taskId)
+  if (t && isActiveStatus(t.status)) connectSSE(taskId)
+  else disconnectSSE()
+}
 
 onMounted(() => {
   loadTasks()
@@ -281,7 +301,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex items-center gap-3 mt-3">
+        <div class="flex items-center gap-3 mt-3 flex-wrap">
           <button
             class="bg-[#2563eb] text-white px-5 py-2 rounded-lg font-bold text-[12px] disabled:opacity-50"
             :disabled="!canSubmitUpload"
@@ -289,7 +309,19 @@ onUnmounted(() => {
           >
             {{ uploadBusy ? '提交中...' : '提交处理' }}
           </button>
-          <span class="text-[11px] text-[#94a3b8]">上传后自动进入处理流水线，可在下方跟踪进度</span>
+          <span class="text-[11px] text-[#94a3b8]">上传后自动进入处理流水线，可在下方跟踪最新执行进度</span>
+          <button
+            class="ml-auto text-[12px] font-bold px-4 py-1.5 rounded-lg border border-[#cbd5e1] text-[#475569] hover:bg-[#f8fafc] hover:border-[#94a3b8] transition-colors flex items-center gap-2"
+            @click="showHistoryModal = true"
+          >
+            <span>历史记录</span>
+            <span
+              v-if="historyCount"
+              class="text-[10px] px-1.5 py-0.5 rounded-full bg-[#363e42] text-white min-w-[20px] text-center"
+            >
+              {{ historyCount }}
+            </span>
+          </button>
         </div>
         <p
           v-if="uploadMsg"
@@ -301,21 +333,22 @@ onUnmounted(() => {
       </div>
 
       <div class="flex-1 grid grid-cols-5 gap-4 min-h-0">
-        <div class="col-span-2 border rounded-xl overflow-hidden flex flex-col">
-          <div class="p-3 bg-[#f8fafc] border-b text-[11px] font-bold text-[#64748b] flex justify-between shrink-0">
-            <span>处理任务 ({{ tasks.length }})</span>
+        <div class="col-span-2 border rounded-xl overflow-hidden flex flex-col min-h-0">
+          <!-- 正在执行 -->
+          <div class="shrink-0 p-3 bg-[#f8fafc] border-b text-[11px] font-bold text-[#64748b] flex justify-between">
+            <span>正在执行 ({{ activeTasks.length }})</span>
             <button class="text-[10px] text-[#2563eb]" @click="loadTasks">刷新</button>
           </div>
-          <div class="flex-1 overflow-y-auto">
-            <div v-if="!tasks.length" class="p-8 text-center text-[#94a3b8] text-[12px]">
-              暂无处理任务<br /><span class="text-[10px]">上传文件后自动创建</span>
+          <div class="flex-1 overflow-y-auto min-h-0">
+            <div v-if="!activeTasks.length" class="p-8 text-center text-[#94a3b8] text-[12px]">
+              暂无进行中的任务<br /><span class="text-[10px]">上传文件后将在此显示最新 {{ ACTIVE_TASK_LIMIT }} 条进度</span>
             </div>
             <div
-              v-for="t in tasks"
+              v-for="t in activeTasks"
               :key="t.task_id"
               class="border-b p-3 cursor-pointer transition-colors"
               :class="detailTaskId === t.task_id ? 'bg-[#eff6ff]' : 'hover:bg-[#f8fafc]'"
-              @click="loadDetail(t.task_id); connectSSE(t.task_id)"
+              @click="selectTask(t.task_id)"
             >
               <div class="flex items-center justify-between mb-1.5">
                 <span class="text-[12px] font-bold truncate flex-1 mr-2">{{ displayName(t.filename) }}</span>
@@ -325,10 +358,7 @@ onUnmounted(() => {
               </div>
               <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-1">
                 <div
-                  class="h-full rounded-full transition-all"
-                  :class="
-                    t.status === 'failed' ? 'bg-red-400' : t.status === 'completed' ? 'bg-green-400' : 'bg-blue-400'
-                  "
+                  class="h-full rounded-full transition-all bg-blue-400"
                   :style="{ width: t.progress + '%' }"
                 />
               </div>
@@ -437,10 +467,16 @@ onUnmounted(() => {
             </div>
           </template>
           <div v-else class="flex-1 flex items-center justify-center text-[#94a3b8] text-[12px]">
-            点击左侧任务查看详情和实时日志
+            点击左侧正在执行的任务查看详情和实时日志
           </div>
         </div>
       </div>
+
+      <MultimodalTaskHistoryModal
+        :open="showHistoryModal"
+        @close="showHistoryModal = false"
+        @deleted="loadTasks"
+      />
     </div>
   </div>
 </template>
