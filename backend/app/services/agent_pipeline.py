@@ -58,7 +58,7 @@ def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
     pipeline_node = get_pipeline_llm()
     if pipeline_node:
         try:
-            result = _call_llm_with_node(pipeline_node, query, history, timeout=8.0)
+            result = _call_llm_with_node(pipeline_node, query, history, timeout=3.0)
             if result:
                 return result
         except Exception:
@@ -70,10 +70,12 @@ def _call_llm_with_node(node, query: str, history: list[dict], timeout: float = 
     """用指定网关节点调用 LLM（短超时，失败自动降级）"""
     import httpx
 
+    from app.llms import _openai_chat_url
+
     hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
     from app.services.prompt_segments import build_preprocess_prompt
     prompt = build_preprocess_prompt(hist, query)
-    url = node.base_url.rstrip("/") + "/chat/completions"
+    url = _openai_chat_url(node.base_url)
     payload = {
         "model": node.model,
         "messages": [{"role": "user", "content": prompt}],
@@ -137,7 +139,7 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
             pipeline_source="rule",
         )
 
-    # 闲聊不走 LLM 预处理，避免阻塞首 token
+    # 闲聊不走 LLM 预处理，避免多轮简单对话卡在「正在理解...」
     if rule_intent.intent == IntentType.CHITCHAT:
         return PipelineResult(
             original_query=q,
