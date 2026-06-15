@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
     LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen-turbo")
-    LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+    LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 
     # ── RAG 嵌入（对齐上级 kb_manager_fast：优先本地 BGE 快照） ──
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")

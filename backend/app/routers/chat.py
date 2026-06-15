@@ -250,6 +250,12 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                     pipeline.rag_query or enriched_question,
                     tenant_id,
                 )
+                # 检索降级：主检索为空时用原问题+宽松阈值重试
+                if not docs and question:
+                    from app.rag import retrieve_merged as _direct_retrieve
+                    docs = await asyncio.to_thread(_direct_retrieve, question, tenant_id)
+                    if not docs:
+                        docs = await asyncio.to_thread(_direct_retrieve, question, str(user_id))
 
             citations = citations_from_docs(docs)
             task_type = "summary" if pipeline.intent in ("complaint",) else "qa"
