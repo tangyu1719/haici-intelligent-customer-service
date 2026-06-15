@@ -57,6 +57,28 @@ export interface ChatMessage {
   }
   /** 助手消息落库/完成时间（ISO） */
   createdAt?: string
+  /** SSE 未正常结束（刷新/断网/切页导致） */
+  streamInterrupted?: boolean
+  /** 阶段提示：正在理解/检索/生成（不混入正文） */
+  phaseStatus?: string
+  /** DeepSeek 等模型的思考过程（reasoning），不写入落库正文 */
+  thinkContent?: string
+  /** 是否仍在接收思考流 */
+  isThinking?: boolean
+  /** 思考完成后自动折叠（正文开始时） */
+  thinkCollapsed?: boolean
+  /** 检索到的知识库片段数 */
+  retrievalCount?: number
+}
+
+export interface ChatFaqItem {
+  id: number
+  category: string
+  question: string
+  answer: string
+  sort_order?: number
+  enabled?: number
+  updated_at?: string | null
 }
 
 export interface FeedbackContextSnapshot {
@@ -177,6 +199,7 @@ export interface SessionMetaSummary {
   message_count?: number
   note?: string | null
   pinned?: boolean
+  streaming?: boolean
 }
 
 export interface ChatSessionItem {
@@ -187,6 +210,10 @@ export interface ChatSessionItem {
   updated_at?: string
   message_count?: number
   meta?: SessionMetaSummary | null
+  user_id?: number
+  username?: string | null
+  nickname?: string | null
+  user_no?: string | null
 }
 
 export interface ChatMessageItem {
@@ -201,6 +228,19 @@ export interface ChatMessageItem {
 export interface ChatSessionDetail extends ChatSessionItem {
   status?: number
   user_id?: number
+  user_deleted?: boolean
+  user_deleted_at?: string | null
+  message_count: number
+  messages?: ChatMessageItem[]
+}
+
+export interface AdminChatSessionItem extends ChatSessionItem {
+  status?: number
+  user_id: number
+  username?: string | null
+  nickname?: string | null
+  user_deleted?: boolean
+  user_deleted_at?: string | null
   message_count: number
   messages?: ChatMessageItem[]
 }
