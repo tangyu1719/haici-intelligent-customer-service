@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import require_admin
+from app.deps import get_current_user, require_permission
 from app.models import ChatMessage, ChatSession, User
 from app.routers.sessions import _message_item, _messages_query, _session_item
 from app.schemas import (
@@ -66,7 +66,7 @@ def list_all_sessions(
     user_deleted: int | None = Query(None, ge=0, le=1, description="用户侧删除 1是0否"),
     status: int | None = Query(None, ge=0, le=1, description="会话状态 1正常0归档"),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _viewer: User = Depends(require_permission("system:session:view")),
 ):
     msg_counts = (
         db.query(ChatMessage.session_id.label("sid"), func.count(ChatMessage.id).label("message_count"))
@@ -105,7 +105,7 @@ def list_all_sessions(
 def get_session_detail_admin(
     session_id: int,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _viewer: User = Depends(require_permission("system:session:view")),
 ):
     session = db.get(ChatSession, session_id)
     if not session:
@@ -126,7 +126,7 @@ def get_messages_admin(
     session_id: int,
     qry: ListQuery = Depends(list_query_params),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _viewer: User = Depends(require_permission("system:session:view")),
 ):
     session = db.get(ChatSession, session_id)
     if not session:
