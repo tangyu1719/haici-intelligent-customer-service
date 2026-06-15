@@ -24,7 +24,9 @@ const routes: RouteRecordRaw[] = [
   { path: '/admin/gateway-circuit', name: 'admin-gateway-circuit', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:agent:circuit' } },
   { path: '/admin/rbac', name: 'admin-rbac', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:rbac:users' } },
   { path: '/admin/feedback', name: 'admin-feedback', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:feedback:view' } },
+  { path: '/admin/sessions', name: 'admin-sessions', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:session:view' } },
   { path: '/admin/users', name: 'admin-users', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:rbac:users' } },
+  { path: '/admin/chat-faq', name: 'admin-chat-faq', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:faq:manage' } },
   { path: '/403', name: 'forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { public: true } },
 ]
 
