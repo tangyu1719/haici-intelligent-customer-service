@@ -289,25 +289,42 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                 yield _sse("citations", {"items": citations, "slices": citations})
 
             parts: list[str] = []
-            if pipeline.faq_answer:
-                parts.append(pipeline.faq_answer)
-                async for evt in _emit_simulated_stream(pipeline.faq_answer):
-                    yield evt
-            elif pipeline.intent == "chitchat":
-                messages = _chitchat_messages(enriched_question, hist_dicts)
-                async for token in get_llm().stream_chat(messages, task_type=task_type):
-                    parts.append(token)
-                    yield _sse("token", {"content": token})
-            elif not docs:
-                fallback = settings.FALLBACK_NO_CONTEXT
-                parts.append(fallback)
-                async for evt in _emit_simulated_stream(fallback):
-                    yield evt
-            else:
-                messages = build_prompt_messages(enriched_question, docs, hist_dicts, pipeline.intent, anti_dilution_summary)
-                async for token in get_llm().stream_chat(messages, task_type=task_type):
-                    parts.append(token)
-                    yield _sse("token", {"content": token})
+            llm_error_code: str | None = None
+            try:
+                if pipeline.faq_answer:
+                    parts.append(pipeline.faq_answer)
+                    async for evt in _emit_simulated_stream(pipeline.faq_answer):
+                        yield evt
+                elif pipeline.intent == "chitchat":
+                    messages = _chitchat_messages(enriched_question, hist_dicts)
+                    async for token in get_llm().stream_chat(messages, task_type=task_type):
+                        parts.append(token)
+                        yield _sse("token", {"content": token})
+                elif not docs:
+                    fallback = settings.FALLBACK_NO_CONTEXT
+                    parts.append(fallback)
+                    async for evt in _emit_simulated_stream(fallback):
+                        yield evt
+                else:
+                    messages = build_prompt_messages(enriched_question, docs, hist_dicts, pipeline.intent, anti_dilution_summary)
+                    async for token in get_llm().stream_chat(messages, task_type=task_type):
+                        parts.append(token)
+                        yield _sse("token", {"content": token})
+            except Exception as llm_exc:
+                from app.services.gateway_error_handler import normalize_error, ErrorCode
+                err_str = str(llm_exc)[:500]
+                code, msg = normalize_error(
+                    node.provider if node else "ark", 0, "", err_str
+                )
+                llm_error_code = code.value
+                logger.error("[RAG-LLM错误] code=%s msg=%s", llm_error_code, msg)
+                from app.services.gateway_circuit_breaker import breaker
+                breaker.handle_response(
+                    node.id if node else "unknown",
+                    node.provider if node else "ark", 500, "", err_str
+                )
+                parts.append(f"AI服务异常 [{llm_error_code}]: {msg}")
+                yield _sse("token", {"content": parts[0]})
 
             answer = "".join(parts).strip()
             assistant_task = schedule_persist_assistant(
@@ -366,6 +383,7 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
                     "assistant_message_id": assistant_message_id,
                     "content": answer,
                     "persist_async": assistant_message_id is None,
+                    "error_code": llm_error_code,
                 },
             )
         except Exception as exc:
