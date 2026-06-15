@@ -12,6 +12,7 @@ MENU_SEED = [
     (4, 2, "F", "发送消息", "", "", "chat:send", 1),
     (5, 2, "F", "消息反馈", "", "", "chat:feedback", 2),
     (6, 3, "F", "查看详情", "", "", "session:detail", 1),
+    (7, 3, "F", "查看全部用户会话", "", "", "session:view:all", 2),
     (10, 0, "M", "知识库", "", "", None, 2),
     (11, 10, "C", "文档管理", "/knowledge", "KnowledgeView", "kb:view", 1),
     (14, 10, "C", "多模态文档", "/multimodal", "MultimodalView", None, 2),
@@ -29,10 +30,11 @@ MENU_SEED = [
     (110, 0, "M", "运维评测", "", "", None, 90),
     (111, 110, "C", "EVAL评测", "/admin/eval", "EvalDashboardView", "system:eval:view", 1),
     (112, 110, "C", "用户反馈", "/admin/feedback", "FeedbackAdminView", "system:feedback:view", 2),
+    (113, 110, "C", "会话审计", "/admin/sessions", "ChatSessionAdminView", "system:session:view", 3),
 ]
 
 VIEWER_MENU_IDS = {1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 20, 21, 22}
-ADMIN_MENU_IDS = {m[0] for m in MENU_SEED}
+ADMIN_MENU_IDS = {m[0] for m in MENU_SEED} | {133, 134}
 
 
 def ensure_roles(db: Session) -> None:
@@ -115,6 +117,7 @@ def sync_ops_eval_menu(db: Session) -> None:
     children = [
         (111, "EVAL评测", "/admin/eval", "EvalDashboardView", "system:eval:view", 1),
         (112, "用户反馈", "/admin/feedback", "FeedbackAdminView", "system:feedback:view", 2),
+        (113, "会话审计", "/admin/sessions", "ChatSessionAdminView", "system:session:view", 3),
     ]
     for mid, name, path, comp, perm, sort in children:
         row = db.query(SysMenu).filter(SysMenu.id == mid).first()
@@ -130,7 +133,7 @@ def sync_ops_eval_menu(db: Session) -> None:
         db.delete(old); db.flush()
     admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
     if admin:
-        for mid in (110, 111, 112):
+        for mid in (110, 111, 112, 113):
             exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
             if not exists: db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))
     db.commit()
@@ -220,21 +223,68 @@ def sync_agent_settings_menu(db: Session) -> None:
 
 
 def sync_system_rbac_menu(db: Session) -> None:
-    """系统管理：用户权限 RBAC。"""
+    """系统管理：用户权限 + 角色权限 RBAC。"""
     parent = db.query(SysMenu).filter(SysMenu.id == 130).first()
     if not parent:
         db.add(SysMenu(id=130, parent_id=0, menu_type="M", name="系统管理", path="", component="", permission=None, sort_order=95, platform="haici"))
     else:
         parent.name = "系统管理"; parent.menu_type = "M"; parent.parent_id = 0; parent.sort_order = 95
-    child = db.query(SysMenu).filter(SysMenu.id == 131).first()
-    if not child:
-        db.add(SysMenu(id=131, parent_id=130, menu_type="C", name="用户权限", path="/admin/users", component="AdminUsersView", permission="system:rbac:users", sort_order=1, platform="haici"))
-    else:
-        child.parent_id = 130; child.menu_type = "C"; child.name = "用户权限"; child.path = "/admin/users"
-        child.component = "AdminUsersView"; child.permission = "system:rbac:users"; child.sort_order = 1
+    children = [
+        (131, "用户权限", "/admin/users", "AdminUsersView", "system:rbac:users", 1),
+        (133, "角色权限", "/admin/rbac", "RolePermissionsView", "system:rbac:roles", 2),
+        (134, "系统设置", "/admin/system-settings", "SystemSettingsView", "system:settings:manage", 3),
+    ]
+    for mid, name, path, comp, perm, sort in children:
+        row = db.query(SysMenu).filter(SysMenu.id == mid).first()
+        if not row:
+            db.add(SysMenu(id=mid, parent_id=130, menu_type="C", name=name, path=path, component=comp, permission=perm, sort_order=sort, platform="haici"))
+        else:
+            row.parent_id = 130; row.menu_type = "C"; row.name = name; row.path = path
+            row.component = comp; row.permission = perm; row.sort_order = sort
+    # 会话历史：查看全部用户会话（按钮权限）
+    perm_row = db.query(SysMenu).filter(SysMenu.id == 7).first()
+    if not perm_row:
+        db.add(SysMenu(id=7, parent_id=3, menu_type="F", name="查看全部用户会话", path="", component="", permission="session:view:all", sort_order=2, platform="haici"))
     admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
     if admin:
-        for mid in (130, 131):
+        for mid in (130, 131, 133, 134, 7):
+            exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
+            if not exists:
+                db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))
+    db.commit()
+
+
+def sync_chat_faq_menu(db: Session) -> None:
+    """系统管理：对话 FAQ 配置（仅 ADMIN）。"""
+    parent = db.query(SysMenu).filter(SysMenu.id == 130).first()
+    if not parent:
+        db.add(SysMenu(id=130, parent_id=0, menu_type="M", name="系统管理", path="", component="", permission=None, sort_order=95, platform="haici"))
+    child = db.query(SysMenu).filter(SysMenu.id == 132).first()
+    if not child:
+        db.add(
+            SysMenu(
+                id=132,
+                parent_id=130,
+                menu_type="C",
+                name="对话 FAQ",
+                path="/admin/chat-faq",
+                component="ChatFaqAdminView",
+                permission="system:faq:manage",
+                sort_order=4,
+                platform="haici",
+            )
+        )
+    else:
+        child.parent_id = 130
+        child.menu_type = "C"
+        child.name = "对话 FAQ"
+        child.path = "/admin/chat-faq"
+        child.component = "ChatFaqAdminView"
+        child.permission = "system:faq:manage"
+        child.sort_order = 4
+    admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
+    if admin:
+        for mid in (130, 132):
             exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
             if not exists:
                 db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))
