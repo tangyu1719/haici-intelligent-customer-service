@@ -33,6 +33,7 @@ class SessionMetaSummary(BaseModel):
     message_count: int = 0
     note: str | None = None
     pinned: bool = False
+    streaming: bool = False
 
 
 class SessionListItem(BaseModel):
@@ -81,7 +82,29 @@ class SessionUpdateRequest(BaseModel):
 class SessionDetailResponse(SessionListItem):
     status: int = 1
     user_id: int | None = None
+    user_deleted: bool = False
+    user_deleted_at: datetime | None = None
     messages: list["MessageItem"] = []
+
+
+class AdminSessionListResponse(SessionListItem):
+    status: int = 1
+    user_id: int
+    username: str | None = None
+    nickname: str | None = None
+    user_deleted: bool = False
+    user_deleted_at: datetime | None = None
+
+
+class AdminSessionDetailResponse(AdminSessionListResponse):
+    messages: list["MessageItem"] = []
+
+
+class AdminSessionPageResponse(BaseModel):
+    total: int
+    page: int
+    size: int
+    items: list[AdminSessionListResponse]
 
 
 class MessageItem(BaseModel):
@@ -206,3 +229,8 @@ class ChatStreamRequest(BaseModel):
     @classmethod
     def trim_question(cls, v: str) -> str:
         return v.strip()
+
+
+class ChatFaqApplyRequest(BaseModel):
+    session_id: int
+    faq_id: int = Field(ge=1)
