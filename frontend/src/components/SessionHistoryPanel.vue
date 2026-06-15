@@ -271,6 +271,10 @@ onMounted(async () => {
 
 <template>
   <div class="session-history flex flex-col min-h-0 h-full">
+    <p v-if="canViewAll" class="text-[11px] text-[#363e42]/55 mb-3 shrink-0">
+      您拥有「查看全部用户会话」权限：默认按时间展示所有用户会话，可按用户 ID 或昵称筛选。
+      数据来自 MySQL 落库，活跃会话约每 {{ persistIntervalHint }} 分钟同步一次，退出/切换会话时立即落库，可能存在短暂延迟。
+    </p>
     <div
       class="flex-1 min-h-0 grid gap-4"
       :class="selectedSessionId ? 'grid-cols-1 xl:grid-cols-12' : 'grid-cols-1'"
@@ -293,6 +297,27 @@ onMounted(async () => {
           @search="loadSessions"
           @reset="resetSessionQuery"
         />
+        <div v-if="canViewAll" class="px-3 pb-3 flex flex-wrap gap-2 items-center text-[11px] border-b border-[#363e42]/8">
+          <input
+            v-model="filterUserId"
+            type="text"
+            placeholder="用户 ID"
+            class="border rounded px-2 py-1 w-24"
+          />
+          <input
+            v-model="filterUserKeyword"
+            type="text"
+            placeholder="搜索用户昵称/账号"
+            class="border rounded px-2 py-1 w-40"
+            @keyup.enter="searchUsers"
+          />
+          <button type="button" class="export-btn" @click="searchUsers">搜用户</button>
+          <select v-if="userOptions.length" v-model="filterUserId" class="border rounded px-2 py-1 max-w-[160px]">
+            <option value="">全部用户</option>
+            <option v-for="u in userOptions" :key="u.id" :value="String(u.id)">{{ u.label }} ({{ u.id }})</option>
+          </select>
+          <button type="button" class="export-btn" @click="loadSessions">应用筛选</button>
+        </div>
         <div class="session-list-toolbar">
           <button
             type="button"
@@ -309,6 +334,7 @@ onMounted(async () => {
             <thead class="bg-[#fcfcfc] text-[#363e42]/60 text-[11px] sticky top-0 z-10">
               <tr>
                 <th class="p-3 text-left">ID</th>
+                <th v-if="canViewAll && !selectedSessionId" class="p-3 text-left">用户</th>
                 <th v-if="!selectedSessionId" class="p-3 text-left">追踪 ID</th>
                 <th class="p-3 text-left">名称</th>
                 <th v-if="!selectedSessionId" class="p-3 text-left">创建时间</th>
@@ -326,6 +352,10 @@ onMounted(async () => {
                 @click="openSessionDetail(s.id)"
               >
                 <td class="p-3 font-mono text-[11px]">{{ s.id }}</td>
+                <td v-if="canViewAll && !selectedSessionId" class="p-3 text-[11px]">
+                  <div class="font-bold">{{ userDisplayLabel(s) }}</div>
+                  <div v-if="s.user_id" class="text-[#363e42]/45">UID {{ s.user_id }}</div>
+                </td>
                 <td v-if="!selectedSessionId" class="p-3 font-mono text-[10px] text-[#363e42]/60 max-w-[120px] truncate" :title="s.context_id">{{ s.context_id }}</td>
                 <td class="p-3">
                   <template v-if="editingSessionId === s.id">
@@ -461,6 +491,10 @@ onMounted(async () => {
             <div class="flex flex-col gap-0.5">
               <dt class="text-[10px] font-bold text-[#363e42]/45 uppercase tracking-wide">追踪 ID（context_id）</dt>
               <dd class="font-mono text-[10px] break-all text-[#363e42]/70">{{ sessionDetail.context_id }}</dd>
+            </div>
+            <div class="flex flex-col gap-0.5">
+              <dt class="text-[10px] font-bold text-[#363e42]/45 uppercase tracking-wide">所属用户</dt>
+              <dd>{{ userDisplayLabel(sessionDetail) }} <span v-if="sessionDetail.user_id" class="text-[#363e42]/45">(UID {{ sessionDetail.user_id }})</span></dd>
             </div>
             <div class="flex flex-col gap-0.5">
               <dt class="text-[10px] font-bold text-[#363e42]/45 uppercase tracking-wide">用户 ID</dt>
