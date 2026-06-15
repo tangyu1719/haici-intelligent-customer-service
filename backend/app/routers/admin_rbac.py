@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from app.auth.rbac import get_user_roles, list_all_roles, set_user_roles
 from app.config import settings
 from app.database import get_db
-from app.deps import require_admin
-from app.models import DailyQuestionUsage, RbacRole, RbacUserRole, User
+from app.deps import get_current_user, require_admin
+from app.models import DailyQuestionUsage, RbacRole, RbacUserRole, SysMenu, SysRoleMenu, User
 from app.services.list_query import (
     ListQuery,
     apply_keyword,
