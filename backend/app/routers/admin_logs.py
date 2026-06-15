@@ -1,11 +1,11 @@
-"""运维日志只读 API（admin）：分页 + 筛选 + 排序。"""
+"""运维日志只读 API（admin）：分页 + 筛选 + 排序 + 详情。"""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,13 @@ from app.services.list_query import (
 
 router = APIRouter(prefix="/admin/logs", tags=["运维日志"])
 
+_LOG_MODELS: dict[str, type] = {
+    "operation": SysLogOperation,
+    "error": SysLogError,
+    "api-call": SysLogApiCall,
+    "schedule": SysLogSchedule,
+}
+
 
 class LogPage(BaseModel):
     total: int
@@ -42,6 +49,16 @@ def _row_to_dict(row: Any) -> dict:
     return d
 
 
+def _get_log_or_404(kind: str, log_id: int, db: Session) -> Any:
+    model = _LOG_MODELS.get(kind)
+    if not model:
+        raise HTTPException(status_code=404, detail="日志类型不存在")
+    row = db.query(model).filter(model.log_id == log_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="日志不存在")
+    return row
+
+
 def _query_logs(model, db: Session, qry: ListQuery, *, keyword_cols: list, sort_map: dict, date_col, name_col=None, extra_filters: dict | None = None) -> LogPage:
     q = db.query(model)
     q = apply_id_filter(q, model.log_id, qry)
@@ -54,26 +71,104 @@ def _query_logs(model, db: Session, qry: ListQuery, *, keyword_cols: list, sort_
             if val is not None and val != "":
                 col = getattr(model, key, None)
                 if col is not None:
-                    q = q.filter(col == val)
+                    if isinstance(val, str) and key in ("client_ip", "operate_no", "user_no", "trace_id"):
+                        q = q.filter(col.ilike(f"%{val}%"))
+                    else:
+                        q = q.filter(col == val)
     q = apply_sort(q, model, qry, sort_map, model.log_id)
     rows, total = paginate(q, qry)
     return LogPage(**page_result([_row_to_dict(r) for r in rows], total, qry))
+
+
+@router.get("/operation/{log_id}")
+def get_operation_log_detail(
+    log_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    row = _get_log_or_404("operation", log_id, db)
+    return {"item": _row_to_dict(row)}
+
+
+@router.get("/operation/{log_id}/sql")
+def get_operation_log_sql(
+    log_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """SQL 执行明细（对齐 WMS IDwLogOperationSqlService/getSyslogSqlById）。"""
+    _get_log_or_404("operation", log_id, db)
+    from app.services.sql_trace import list_sql_by_operation_log_id
+
+    items = list_sql_by_operation_log_id(log_id)
+    return {
+        "operation_log_id": log_id,
+        "items": items,
+        "total": len(items),
+    }
+
+
+@router.get("/error/{log_id}")
+def get_error_log_detail(
+    log_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    row = _get_log_or_404("error", log_id, db)
+    return {"item": _row_to_dict(row)}
+
+
+@router.get("/api-call/{log_id}")
+def get_api_call_log_detail(
+    log_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    row = _get_log_or_404("api-call", log_id, db)
+    return {"item": _row_to_dict(row)}
+
+
+@router.get("/schedule/{log_id}")
+def get_schedule_log_detail(
+    log_id: int,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    row = _get_log_or_404("schedule", log_id, db)
+    return {"item": _row_to_dict(row)}
 
 
 @router.get("/operation", response_model=LogPage)
 def list_operation_logs(
     qry: ListQuery = Depends(list_query_params),
     module: str = Query("", description="模块名"),
+    client_ip: str = Query("", description="客户端 IP"),
+    operate_no: str = Query("", description="操作流水号"),
+    user_no: str = Query("", description="操作人用户号"),
     user_id: int | None = Query(None),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    extra = {"module": module.strip() or None, "user_id": user_id}
+    extra = {
+        "module": module.strip() or None,
+        "client_ip": client_ip.strip() or None,
+        "operate_no": operate_no.strip() or None,
+        "user_no": user_no.strip() or None,
+        "user_id": user_id,
+    }
     return _query_logs(
         SysLogOperation,
         db,
         qry,
-        keyword_cols=[SysLogOperation.url, SysLogOperation.module, SysLogOperation.trace_id, SysLogOperation.operate_no],
+        keyword_cols=[
+            SysLogOperation.url,
+            SysLogOperation.module,
+            SysLogOperation.trace_id,
+            SysLogOperation.operate_no,
+            SysLogOperation.user_no,
+            SysLogOperation.operate_desc,
+            SysLogOperation.input_value,
+        ],
         sort_map={"log_id": SysLogOperation.log_id, "created_at": SysLogOperation.created_at},
         date_col=SysLogOperation.created_at,
         name_col=SysLogOperation.module,
@@ -85,15 +180,23 @@ def list_operation_logs(
 def list_error_logs(
     qry: ListQuery = Depends(list_query_params),
     module: str = Query("", description="模块名"),
+    client_ip: str = Query("", description="客户端 IP"),
+    operate_no: str = Query("", description="操作流水号"),
+    error_type: int | None = Query(None, ge=1, le=3, description="1系统2操作3API"),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    extra = {"module": module.strip() or None}
+    extra = {
+        "module": module.strip() or None,
+        "client_ip": client_ip.strip() or None,
+        "operate_no": operate_no.strip() or None,
+        "error_type": error_type,
+    }
     return _query_logs(
         SysLogError,
         db,
         qry,
-        keyword_cols=[SysLogError.url, SysLogError.module, SysLogError.trace_id, SysLogError.error_message],
+        keyword_cols=[SysLogError.url, SysLogError.module, SysLogError.trace_id, SysLogError.error_message, SysLogError.operate_no],
         sort_map={"log_id": SysLogError.log_id, "created_at": SysLogError.created_at},
         date_col=SysLogError.created_at,
         name_col=SysLogError.module,
@@ -107,15 +210,21 @@ def list_api_call_logs(
     api_type: str = Query("", description="API 类型"),
     success: int | None = Query(None, ge=0, le=1),
     user_id: int | None = Query(None),
+    trace_id: str = Query("", description="追踪 ID"),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
-    extra = {"api_type": api_type.strip() or None, "success": success, "user_id": user_id}
+    extra = {
+        "api_type": api_type.strip() or None,
+        "success": success,
+        "user_id": user_id,
+        "trace_id": trace_id.strip() or None,
+    }
     return _query_logs(
         SysLogApiCall,
         db,
         qry,
-        keyword_cols=[SysLogApiCall.target_url, SysLogApiCall.api_type, SysLogApiCall.trace_id, SysLogApiCall.error_message],
+        keyword_cols=[SysLogApiCall.target_url, SysLogApiCall.api_type, SysLogApiCall.trace_id, SysLogApiCall.error_message, SysLogApiCall.request_summary],
         sort_map={"log_id": SysLogApiCall.log_id, "created_at": SysLogApiCall.created_at},
         date_col=SysLogApiCall.created_at,
         name_col=SysLogApiCall.api_type,
@@ -127,7 +236,7 @@ def list_api_call_logs(
 def list_schedule_logs(
     qry: ListQuery = Depends(list_query_params),
     job_name: str = Query("", description="任务名"),
-    execute_state: int | None = Query(None),
+    execute_state: int | None = Query(None, ge=0, le=1),
     db: Session = Depends(get_db),
     _user: User = Depends(get_current_user),
 ):
@@ -136,7 +245,7 @@ def list_schedule_logs(
         SysLogSchedule,
         db,
         qry,
-        keyword_cols=[SysLogSchedule.job_name, SysLogSchedule.job_group, SysLogSchedule.job_desc, SysLogSchedule.error_msg],
+        keyword_cols=[SysLogSchedule.job_name, SysLogSchedule.job_group, SysLogSchedule.job_desc, SysLogSchedule.error_msg, SysLogSchedule.job_info],
         sort_map={"log_id": SysLogSchedule.log_id, "created_at": SysLogSchedule.created_at, "start_time": SysLogSchedule.start_time},
         date_col=SysLogSchedule.created_at,
         name_col=SysLogSchedule.job_name,

@@ -44,6 +44,14 @@ _FEEDBACK_COLUMN_DDL = [
     ("context_snapshot_json", "ADD COLUMN context_snapshot_json JSON NULL COMMENT '反馈上下文快照' AFTER intent_liked"),
 ]
 
+_LOG_OPERATION_COLUMN_DDL = [
+    ("operate_desc", "ADD COLUMN operate_desc VARCHAR(255) NOT NULL DEFAULT '' COMMENT '操作描述' AFTER menu_permission"),
+]
+
+_LOG_ERROR_COLUMN_DDL = [
+    ("prog_impl", "ADD COLUMN prog_impl VARCHAR(512) NULL DEFAULT '' COMMENT '代码定位' AFTER error_message"),
+]
+
 
 def _ensure_users_columns(conn) -> None:
     rows = conn.execute(text("SHOW COLUMNS FROM users")).fetchall()
@@ -59,6 +67,61 @@ def _ensure_users_columns(conn) -> None:
         conn.execute(text("ALTER TABLE users MODIFY password_hash VARCHAR(255) NULL"))
     except Exception:
         pass
+
+
+def _ensure_log_sql_schema(conn) -> None:
+    try:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS sys_log_operation_sql (
+                  log_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                  operation_log_id BIGINT NOT NULL DEFAULT 0,
+                  log_type TINYINT NOT NULL DEFAULT 1 COMMENT '1操作 2调度',
+                  cmd_table VARCHAR(128) DEFAULT '',
+                  cmd_statement TEXT,
+                  cmd_parameters TEXT,
+                  cmd_seq INT NOT NULL DEFAULT 0,
+                  trace_id VARCHAR(64) DEFAULT '',
+                  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  INDEX idx_op_sql_op (operation_log_id),
+                  INDEX idx_op_sql_trace (trace_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """
+            )
+        )
+    except Exception as exc:
+        logger.warning("[登录模块-迁移|bootstrap|sys_log_operation_sql|硬编执行|跳过] err=%s", str(exc)[:120])
+
+
+def _ensure_sys_log_operation_columns(conn) -> None:
+    try:
+        rows = conn.execute(text("SHOW COLUMNS FROM sys_log_operation")).fetchall()
+    except Exception:
+        return
+    existing = {r[0] for r in rows}
+    for col, ddl in _LOG_OPERATION_COLUMN_DDL:
+        if col in existing:
+            continue
+        try:
+            conn.execute(text(f"ALTER TABLE sys_log_operation {ddl}"))
+        except Exception as exc:
+            logger.warning("[登录模块-迁移|bootstrap|sys_log_operation.%s|硬编执行|跳过] err=%s", col, str(exc)[:120])
+
+
+def _ensure_sys_log_error_columns(conn) -> None:
+    try:
+        rows = conn.execute(text("SHOW COLUMNS FROM sys_log_error")).fetchall()
+    except Exception:
+        return
+    existing = {r[0] for r in rows}
+    for col, ddl in _LOG_ERROR_COLUMN_DDL:
+        if col in existing:
+            continue
+        try:
+            conn.execute(text(f"ALTER TABLE sys_log_error {ddl}"))
+        except Exception as exc:
+            logger.warning("[登录模块-迁移|bootstrap|sys_log_error.%s|硬编执行|跳过] err=%s", col, str(exc)[:120])
 
 
 def _ensure_message_feedback_columns(conn) -> None:
@@ -115,6 +178,9 @@ def _run_sql_migration() -> None:
         _ensure_users_columns(conn)
         _ensure_chat_sessions_columns(conn)
         _ensure_message_feedback_columns(conn)
+        _ensure_log_sql_schema(conn)
+        _ensure_sys_log_operation_columns(conn)
+        _ensure_sys_log_error_columns(conn)
         for stmt in stmts:
             upper = stmt.upper()
             if upper.startswith("USE ") or "ALTER TABLE USERS" in upper:

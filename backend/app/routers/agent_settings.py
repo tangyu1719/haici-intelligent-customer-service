@@ -30,6 +30,8 @@ from app.services.agent_gateway import (
 )
 from app.services.agent_prompt_registry import (
     AGENT_CATALOG,
+    SUB_AGENT_CATALOG,
+    get_agent_guide,
     load_agent_prompt,
     load_agent_routing,
     list_agent_catalog,
@@ -101,13 +103,17 @@ def agents_catalog(_user=Depends(get_current_user)):
 @router.get("/agents-md/{agent_key}")
 def get_agent_md(agent_key: str, _user=Depends(get_current_user)):
     content = load_agent_prompt(agent_key)
-    meta = AGENT_CATALOG.get(agent_key) or {}
+    meta = AGENT_CATALOG.get(agent_key) or SUB_AGENT_CATALOG.get(agent_key) or {}
     return {
         "agent_key": agent_key,
         "content": content,
         "label": meta.get("label", agent_key),
         "variables": meta.get("variables", []),
         "hint": meta.get("hint", ""),
+        "guide": get_agent_guide(agent_key),
+        "overview_only": bool(meta.get("overview_only")),
+        "is_sub_agent": agent_key in SUB_AGENT_CATALOG,
+        "parent_key": meta.get("parent_key"),
     }
 
 

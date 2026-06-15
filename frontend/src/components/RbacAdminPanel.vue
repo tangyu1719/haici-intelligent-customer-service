@@ -4,7 +4,7 @@ import { authHeaders } from '../api/auth'
 
 interface PermItem { key: string; label: string }
 interface ModulePerms { module_key: string; label: string; description: string; perms: PermItem[] }
-interface RoleItem { id: number; code: string; name: string }
+interface RoleItem { id?: number; code: string; name: string }
 interface RolePermRow { role: RoleItem; permissions: string[] }
 interface UserItem { user_id: number; user_no: string; username: string; nickname: string; email: string; roles: {code:string;name:string}[]; daily_used?: number; daily_limit?: number }
 
@@ -32,6 +32,10 @@ async function loadAll() {
 }
 
 // ── 角色权限编辑 ──
+function isRoleActive(role: RoleItem): boolean {
+  return !!editRole.value && editRole.value.code === role.code
+}
+
 function startEditRole(role: RoleItem) {
   editRole.value = role
   const row = matrix.value.find(r => r.role.code === role.code)
@@ -45,9 +49,13 @@ function togglePerm(key: string) {
 function cancelEditRole() { editRole.value = null; editPerms.value = [] }
 async function saveRolePerms() {
   if (!editRole.value) return
+  const target = roles.value.find((r) => r.code === editRole.value!.code) || editRole.value
+  if (!target?.id) {
+    msg.value = '保存失败：角色 ID 无效'
+    return
+  }
   msg.value = ''
-  // 构建权限集合 (通过menu permission列)
-  const r = await fetch(`/api/v1/admin/rbac/roles/${editRole.value.id}/permissions`, {
+  const r = await fetch(`/api/v1/admin/rbac/roles/${target.id}/permissions`, {
     method: 'PUT', headers: authHeaders(),
     body: JSON.stringify({ permissions: editPerms.value }),
   })
@@ -145,10 +153,13 @@ onMounted(loadAll)
         <!-- 左侧角色列表 -->
         <div class="bg-white border rounded-xl p-3">
           <h3 class="text-[12px] font-bold mb-3 text-[#64748b]">角色列表</h3>
-          <div v-for="r in roles" :key="r.id"
-            class="p-2.5 rounded-lg cursor-pointer mb-1 flex items-center justify-between"
-            :class="editRole?.id===r.id?'bg-[#eff6ff] border border-[#2563eb]':'hover:bg-[#f8fafc] border border-transparent'"
-            @click="startEditRole(r)">
+          <div
+            v-for="r in roles"
+            :key="r.code"
+            class="role-list-item"
+            :class="{ 'role-list-item--active': isRoleActive(r) }"
+            @click="startEditRole(r)"
+          >
             <div>
               <div class="text-[12px] font-bold">{{ r.name }}</div>
               <code class="text-[10px] text-[#94a3b8]">{{ r.code }}</code>
@@ -192,3 +203,34 @@ onMounted(loadAll)
     </div>
   </div>
 </template>
+
+<style scoped>
+.role-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.role-list-item:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.role-list-item--active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.role-list-item--active:hover {
+  background: #eff6ff;
+}
+</style>

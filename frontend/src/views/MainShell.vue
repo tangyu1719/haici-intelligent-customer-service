@@ -16,6 +16,8 @@ import StructuredPanel from '../components/StructuredPanel.vue'
 import RbacAdminPanel from '../components/RbacAdminPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
 import SessionHistoryPanel from '../components/SessionHistoryPanel.vue'
+import LogManagementPanel from '../components/logs/LogManagementPanel.vue'
+import type { LogKind } from '../components/logs/LogManagementPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 import { fixDisplayFilename } from '../utils/filename'
 
@@ -44,12 +46,6 @@ const selectedKbId = ref<number | null>(null)
 const kbCreating = ref(false)
 const kbCreateName = ref('')
 const kbCreateDesc = ref('')
-const adminLogRows = ref<Record<string, unknown>[]>([])
-const adminLogTotal = ref(0)
-const adminLogPage = ref(1)
-const adminLogSize = ref(20)
-const logQuery = ref<ListQueryState>(defaultListQuery(20))
-const logModuleFilter = ref('')
 const profileNickname = ref('')
 const profilePhone = ref('')
 const profilePhoneCode = ref('')
@@ -115,12 +111,11 @@ const pageTitle = computed(() => {
   return map[route.path] || 'HaiCi 智能客服'
 })
 
-const adminLogKind = computed(() => {
+const adminLogKind = computed((): LogKind => {
   if (route.path.endsWith('/error')) return 'error'
   if (route.path.endsWith('/api-call')) return 'api-call'
   if (route.path.endsWith('/schedule')) return 'schedule'
-  if (route.path.includes('/admin/logs')) return 'operation'
-  return ''
+  return 'operation'
 })
 
 const hideGlobalHeader = computed(() => route.path === '/chat')
@@ -231,35 +226,6 @@ const fmtDateTime = (s?: string): string => {
   })
 }
 
-const loadAdminLogs = async (): Promise<void> => {
-  const kind = adminLogKind.value
-  if (!kind) return
-  logQuery.value.page = adminLogPage.value
-  logQuery.value.size = adminLogSize.value
-  const extras: Record<string, string | undefined> = {}
-  if (logModuleFilter.value) {
-    if (kind === 'schedule') extras.job_name = logModuleFilter.value
-    else if (kind === 'api-call') extras.api_type = logModuleFilter.value
-    else extras.module = logModuleFilter.value
-  }
-  const qs = toSearchParams(logQuery.value, extras)
-  const res = await fetch(`/api/v1/admin/logs/${kind}?${qs}`, { headers: authHeaders() })
-  if (res.ok) {
-    const data = await res.json()
-    adminLogRows.value = data.items || []
-    adminLogTotal.value = data.total || 0
-    adminLogPage.value = data.page || logQuery.value.page
-    adminLogSize.value = data.size || logQuery.value.size
-  }
-}
-
-const resetLogQuery = (): void => {
-  logQuery.value = defaultListQuery(20)
-  logModuleFilter.value = ''
-  adminLogPage.value = 1
-  loadAdminLogs()
-}
-
 const loadMe = async (): Promise<void> => {
   const res = await fetch('/api/v1/auth/me', { headers: authHeaders() })
   if (res.ok) {
@@ -361,20 +327,12 @@ watch(
     }
     if (p === '/profile') await loadMe()
     if (p === '/profile/feedback') { /* ProfileFeedbackPanel 自加载 */ }
-    if (p.startsWith('/admin/logs/')) {
-      adminLogPage.value = 1
-      await loadAdminLogs()
-    }
   },
   { immediate: true }
 )
 
 watch(() => [kbQuery.value.page, kbQuery.value.size], () => {
   if (route.path === '/knowledge') loadKnowledge()
-})
-
-watch(() => [adminLogPage.value, adminLogSize.value], () => {
-  if (route.path.startsWith('/admin/logs/')) loadAdminLogs()
 })
 
 onMounted(async () => {
@@ -677,42 +635,7 @@ onMounted(async () => {
       <GatewayCircuitPanel v-else-if="route.path === '/admin/gateway-circuit'" class="flex-1 overflow-y-auto" />
       <RbacAdminPanel v-else-if="route.path === '/admin/rbac'" class="flex-1 overflow-y-auto" />
 
-      <div v-else-if="route.path.startsWith('/admin/logs/')" class="flex-1 p-6 overflow-y-auto">
-        <div class="max-w-6xl mx-auto bg-white rounded-2xl border overflow-hidden">
-          <div class="p-4 border-b">
-            <span class="text-sm font-bold text-[#363e42]/60">运维日志（只读）</span>
-          </div>
-          <ListQueryBar
-            v-model="logQuery"
-            :sort-options="[{ value: 'created_at', label: '创建时间' }, { value: 'log_id', label: '日志 ID' }]"
-            :name-placeholder="adminLogKind === 'schedule' ? '任务名' : adminLogKind === 'api-call' ? 'API 类型' : '模块名'"
-            keyword-placeholder="URL/trace/错误信息关键词"
-            @search="adminLogPage = 1; loadAdminLogs()"
-            @reset="resetLogQuery"
-          />
-          <div class="px-3 pb-2 text-[11px] font-bold text-[#363e42]/60">
-            <label>{{ adminLogKind === 'schedule' ? '任务名' : adminLogKind === 'api-call' ? 'API 类型' : '模块' }}
-              <input v-model="logModuleFilter" class="ml-2 border rounded px-2 py-1 font-normal" placeholder="精确筛选" @keyup.enter="adminLogPage = 1; loadAdminLogs()" />
-            </label>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs">
-              <thead class="bg-[#fcfcfc] text-[#363e42]/60">
-                <tr>
-                  <th v-for="col in Object.keys(adminLogRows[0] || { log_id: 1, created_at: 1 }).slice(0, 8)" :key="col" class="p-2 text-left whitespace-nowrap">{{ col }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, idx) in adminLogRows" :key="idx" class="border-t">
-                  <td v-for="col in Object.keys(adminLogRows[0] || { log_id: 1, created_at: 1 }).slice(0, 8)" :key="col" class="p-2 max-w-[200px] truncate">{{ row[col] }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-if="!adminLogRows.length" class="p-8 text-center text-[#363e42]/40">暂无日志</p>
-          <ListPagination v-model:page="adminLogPage" v-model:size="adminLogSize" :total="adminLogTotal" />
-        </div>
-      </div>
+      <LogManagementPanel v-else-if="route.path.startsWith('/admin/logs/')" :key="adminLogKind" :kind="adminLogKind" class="flex-1 overflow-hidden flex flex-col min-h-0" />
 
       <ProfileFeedbackPanel v-else-if="route.path === '/profile/feedback'" class="flex-1 p-6 overflow-y-auto" />
 

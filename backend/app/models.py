@@ -340,6 +340,7 @@ class SysLogOperation(Base):
     user_no: Mapped[str | None] = mapped_column(String(32))
     module: Mapped[str] = mapped_column(String(64), default="")
     menu_permission: Mapped[str] = mapped_column(String(128), default="")
+    operate_desc: Mapped[str] = mapped_column(String(255), default="")
     url: Mapped[str] = mapped_column(String(512), default="")
     method: Mapped[str] = mapped_column(String(16), default="")
     input_value: Mapped[str | None] = mapped_column(Text)
@@ -360,6 +361,7 @@ class SysLogError(Base):
     url: Mapped[str] = mapped_column(String(512), default="")
     module: Mapped[str] = mapped_column(String(64), default="")
     error_message: Mapped[str | None] = mapped_column(Text)
+    prog_impl: Mapped[str | None] = mapped_column(String(512), default="")
     trace_id: Mapped[str] = mapped_column(String(64), default="")
     client_ip: Mapped[str] = mapped_column(String(64), default="")
     input_value: Mapped[str | None] = mapped_column(Text)
@@ -399,4 +401,17 @@ class SysLogSchedule(Base):
     job_tag: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+
+class SysLogOperationSql(Base):
+    __tablename__ = "sys_log_operation_sql"
+
+    log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    operation_log_id: Mapped[int] = mapped_column(BigInteger, index=True, default=0)
+    log_type: Mapped[int] = mapped_column(Integer, default=1)
+    cmd_table: Mapped[str] = mapped_column(String(128), default="")
+    cmd_statement: Mapped[str | None] = mapped_column(Text)
+    cmd_parameters: Mapped[str | None] = mapped_column(Text)
+    cmd_seq: Mapped[int] = mapped_column(Integer, default=0)
+    trace_id: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

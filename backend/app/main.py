@@ -69,6 +69,10 @@ app.mount("/output", StaticFiles(directory=str(_OUTPUT_DIR)), name="output")
 
 @app.on_event("startup")
 def on_startup() -> None:
+    from app.database import engine
+    from app.services.sql_trace import register_sql_listeners
+
+    register_sql_listeners(engine)
     ensure_auth_ready()
 
 if SERVE_FRONTEND_DIR.exists():
