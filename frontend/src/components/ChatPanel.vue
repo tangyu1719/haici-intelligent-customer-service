@@ -6,6 +6,7 @@ import ListPagination from './ListPagination.vue'
 import { hydrateMsgCitations } from '../utils/ragCitations'
 import { INTENT_LABELS } from '../utils/intentLabels'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
+import { useSpeechInput } from '../utils/useSpeechInput'
 import type { ChatAttachment, ChatMessage, ChatPendingUpload, ChatSessionItem, KnowledgeBaseBrief, PlatformHealthSnapshot } from '../types'
 
 const bearerOnly = (): Record<string, string> => {
@@ -14,6 +15,7 @@ const bearerOnly = (): Record<string, string> => {
 }
 
 const MAX_PENDING_UPLOADS = 6
+const LAST_SESSION_KEY = 'hc_last_chat_session_id'
 
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
@@ -30,11 +32,40 @@ const sessionSidebarOpen = ref(true)
 const editingSessionId = ref<number | null>(null)
 const editingTitle = ref('')
 const maxQuestionLength = ref(500)
+const dailyQuota = ref({
+  limit: 100,
+  used: 0,
+  remaining: 100,
+  unlimited: false,
+})
 const kbList = ref<KnowledgeBaseBrief[]>([])
 const selectedKbId = ref<number | null>(null)
 const pendingUploads = ref<ChatPendingUpload[]>([])
 const imageInputRef = ref<HTMLInputElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const inputTextareaRef = ref<HTMLTextAreaElement | null>(null)
+
+const resizeInputTextarea = (): void => {
+  void nextTick(() => {
+    const el = inputTextareaRef.value
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  })
+}
+
+const speechInput = useSpeechInput({
+  lang: 'zh-CN',
+  onText: (text) => {
+    inputText.value = text.slice(0, maxQuestionLength.value)
+    resizeInputTextarea()
+  },
+})
+
+const toggleVoiceInput = (): void => {
+  if (isWaiting.value) return
+  speechInput.toggle(inputText.value)
+}
 
 const inputCharCount = computed(() => inputText.value.length)
 const canSend = computed(() => {
@@ -54,9 +85,10 @@ const fmtDateShort = (s?: string): string => {
 }
 
 const contextTitle = computed(() => {
+  if (!sessionId.value) return '请选择或新建对话'
   const cur = chatSessions.value.find((s) => s.id === sessionId.value)
   const t = (cur?.title || '').trim()
-  return t && t !== '新对话' ? t : sessionId.value ? `会话 #${sessionId.value}` : '新对话'
+  return t && t !== '新对话' ? t : `会话 #${sessionId.value}`
 })
 
 const currentContextId = computed(() => {
@@ -75,7 +107,10 @@ const healthSummary = computed(() => {
   if (healthLoading.value) return '检测中…'
   if (!health.value?.ready) return '未检测'
   const s = health.value.summary
-  return `${s.ok} 正常 · ${s.error} 异常`
+  const parts = [`${s.ok} 正常`]
+  if ((s.warn ?? 0) > 0) parts.push(`${s.warn} 降级`)
+  if ((s.error ?? 0) > 0) parts.push(`${s.error} 异常`)
+  return parts.join(' · ')
 })
 
 const loadPlatformHealth = async (refresh = false): Promise<void> => {
@@ -106,6 +141,16 @@ const loadChatConfig = async (): Promise<void> => {
     if (res.ok) {
       const data = await res.json()
       maxQuestionLength.value = data.max_question_length ?? 500
+      const limit = data.daily_question_limit ?? 100
+      const used = data.daily_questions_used ?? 0
+      const remaining =
+        data.daily_questions_remaining ?? Math.max(0, limit - used)
+      dailyQuota.value = {
+        limit,
+        used,
+        remaining,
+        unlimited: !!data.daily_quota_unlimited,
+      }
     }
   } catch {
     maxQuestionLength.value = 500
@@ -137,6 +182,33 @@ const loadChatSessions = async (): Promise<void> => {
   }
 }
 
+const saveLastSession = (id: number): void => {
+  localStorage.setItem(LAST_SESSION_KEY, String(id))
+}
+
+const pickPreferredSession = (): ChatSessionItem | undefined => {
+  if (!chatSessions.value.length) return undefined
+  const savedId = Number(localStorage.getItem(LAST_SESSION_KEY) || 0)
+  if (savedId) {
+    const saved = chatSessions.value.find((s) => s.id === savedId)
+    if (saved && (saved.message_count ?? 0) > 0) return saved
+  }
+  return (
+    chatSessions.value.find((s) => (s.message_count ?? 0) > 0)
+    ?? chatSessions.value[0]
+  )
+}
+
+const restoreInitialSession = async (): Promise<void> => {
+  const target = pickPreferredSession()
+  if (!target) {
+    sessionId.value = null
+    messages.value = []
+    return
+  }
+  await switchSession(target.id)
+}
+
 const resetSessionSidebarQuery = (): void => {
   sessionQuery.value = { ...defaultListQuery(15), sortBy: 'updated_at', sortOrder: 'desc' }
   loadChatSessions()
@@ -147,6 +219,7 @@ const ensureSession = async (): Promise<number> => {
   const res = await fetch('/api/v1/sessions', { method: 'POST', headers: authHeaders() })
   const data = await res.json()
   sessionId.value = data.id as number
+  saveLastSession(sessionId.value)
   await loadChatSessions()
   return sessionId.value as number
 }
@@ -166,7 +239,7 @@ const loadSessionMessages = async (id: number): Promise<void> => {
   scrollToBottom()
 }
 
-const mapHistoryMessages = (rows: { role: string; content: string; intent_label?: string; citations?: unknown; id: number }[]): ChatMessage[] =>
+const mapHistoryMessages = (rows: { role: string; content: string; intent_label?: string; citations?: unknown; id: number; created_at?: string }[]): ChatMessage[] =>
   rows.map((m) => {
     const code = m.intent_label || ''
     const msg: ChatMessage = {
@@ -177,6 +250,7 @@ const mapHistoryMessages = (rows: { role: string; content: string; intent_label?
       citations: Array.isArray(m.citations) ? m.citations : [],
       ragPrefetchSlices: Array.isArray(m.citations) ? m.citations : [],
       messageId: m.id,
+      createdAt: m.created_at,
       isStreaming: false,
     }
     if (msg.role === 'assistant') hydrateMsgCitations(msg)
@@ -185,17 +259,21 @@ const mapHistoryMessages = (rows: { role: string; content: string; intent_label?
 
 const switchSession = async (id: number): Promise<void> => {
   if (isWaiting.value) return
+  speechInput.stop()
   sessionId.value = id
+  saveLastSession(id)
   await loadSessionMessages(id)
 }
 
 const newSession = async (): Promise<void> => {
   if (isWaiting.value) return
+  speechInput.stop()
   const res = await fetch('/api/v1/sessions', { method: 'POST', headers: authHeaders() })
   if (!res.ok) return
   const data = await res.json()
   sessionId.value = data.id
   messages.value = []
+  saveLastSession(data.id as number)
   editingSessionId.value = null
   await loadChatSessions()
 }
@@ -229,7 +307,7 @@ const saveEditSession = async (id: number): Promise<void> => {
 
 const archiveSession = async (id: number, e: Event): Promise<void> => {
   e.stopPropagation()
-  if (isWaiting.value || !window.confirm('确定归档该会话？归档后将从列表中隐藏。')) return
+  if (isWaiting.value || !window.confirm('确定删除该会话？删除后将从列表中隐藏。')) return
   const res = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
   if (!res.ok) return
   if (sessionId.value === id) {
@@ -238,7 +316,8 @@ const archiveSession = async (id: number, e: Event): Promise<void> => {
   }
   await loadChatSessions()
   if (!sessionId.value && chatSessions.value.length) {
-    await switchSession(chatSessions.value[0].id)
+    const next = pickPreferredSession()
+    if (next) await switchSession(next.id)
   }
 }
 
@@ -252,6 +331,7 @@ const adjustTextareaHeight = (e: Event): void => {
   const el = e.target as HTMLTextAreaElement
   el.style.height = 'auto'
   el.style.height = `${Math.min(el.scrollHeight, 140)}px`
+  if (speechInput.error.value) speechInput.error.value = ''
 }
 
 const uploadOneFile = async (file: File): Promise<{ path: string; name: string }> => {
@@ -343,6 +423,7 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
     alert('请先移除上传失败的附件')
     return
   }
+  speechInput.stop()
   await ensureSession()
   const displayContent = text || (attachments.length === 1 ? `[附件] ${attachments[0].name}` : `[${attachments.length} 个附件]`)
   messages.value.push({
@@ -451,10 +532,12 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
     if (streamAssistantMsg) {
       const finished = streamAssistantMsg as ChatMessage
       finished.isStreaming = false
+      if (!finished.createdAt) finished.createdAt = new Date().toISOString()
       hydrateMsgCitations(finished)
     }
     isWaiting.value = false
     scrollToBottom()
+    void loadChatConfig()
   }
 }
 
@@ -482,44 +565,12 @@ onMounted(async () => {
   await loadChatSessions()
   await loadPlatformHealth(false)
   await loadKbList()
-  if (chatSessions.value.length) {
-    await switchSession(chatSessions.value[0].id)
-  } else {
-    await ensureSession()
-  }
+  await restoreInitialSession()
 })
 </script>
 
 <template>
   <div class="flex-1 flex flex-col overflow-hidden min-h-0">
-    <div class="h-14 border-b border-[#363e42]/5 bg-white/90 backdrop-blur-md flex items-center gap-3 px-4 shrink-0 flex-wrap chat-topbar">
-      <button
-        type="button"
-        class="chat-topbar-toggle"
-        :title="sessionSidebarOpen ? '收起会话列表' : '展开会话列表'"
-        @click="sessionSidebarOpen = !sessionSidebarOpen"
-      >
-        <i class="fas" :class="sessionSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
-      </button>
-      <h2 class="chat-topbar-title">{{ contextTitle }}</h2>
-      <span v-if="sessionId" class="chat-topbar-session-id" title="当前会话编号">#{{ sessionId }}</span>
-      <div class="health-bar" @click="healthOpen = !healthOpen">
-        <span class="health-bar-title">健康检查</span>
-        <span class="health-bar-summary" :class="health?.all_ok ? 'health-ok' : 'health-warn'">{{ healthSummary }}</span>
-        <button type="button" class="health-refresh" @click.stop="loadPlatformHealth(true)">刷新</button>
-        <span class="health-chevron" :class="{ open: healthOpen }">▾</span>
-      </div>
-      <div v-if="healthOpen" class="health-drop">
-        <p v-if="health?.error" class="health-err">{{ health.error }}</p>
-        <div v-for="it in health?.items || []" :key="it.id" class="health-row" :class="`health-row--${it.status}`">
-          <span class="health-label">{{ it.label }}</span>
-          <span class="health-status">{{ it.status === 'ok' ? '正常' : it.status === 'warn' ? '降级' : '异常' }}</span>
-          <span v-if="it.latency_ms" class="health-lat">{{ it.latency_ms }}ms</span>
-          <p v-if="it.error" class="health-err-line">{{ it.error }}</p>
-        </div>
-      </div>
-    </div>
-
     <div class="flex flex-1 min-h-0 overflow-hidden session-layout">
       <aside
         class="session-sidebar border-r border-[#363e42]/8 bg-[#fafafa] flex flex-col shrink-0 transition-[width] duration-300 ease-out overflow-hidden"
@@ -529,7 +580,7 @@ onMounted(async () => {
           <div class="p-2.5 border-b border-[#363e42]/8 bg-white">
             <button
               type="button"
-              class="w-full text-[13px] font-bold bg-[#363e42] text-white rounded-lg py-2.5"
+              class="w-full text-[11px] font-bold bg-[#363e42] text-white rounded-lg py-2"
               :disabled="isWaiting"
               @click="newSession"
             >
@@ -565,18 +616,26 @@ onMounted(async () => {
               class="session-item border-b border-[#363e42]/6 transition-colors group"
               :class="sessionId === s.id ? 'session-item--active' : ''"
             >
-              <div
-                v-if="editingSessionId !== s.id"
-                class="px-3 py-3 cursor-pointer"
-                @click="switchSession(s.id)"
+            <div
+              v-if="editingSessionId !== s.id"
+              class="session-item-row px-2 py-2 cursor-pointer"
+              @click="switchSession(s.id)"
+            >
+              <button
+                type="button"
+                class="session-delete-btn shrink-0"
+                title="删除会话"
+                @click="archiveSession(s.id, $event)"
               >
-                <div class="flex items-start justify-between gap-2 mb-2">
+                🗑
+              </button>
+              <div class="session-item-main flex-1 min-w-0">
+                <div class="flex items-start justify-between gap-2 mb-1">
                   <div class="session-item-title truncate flex-1">
                     {{ s.title || `会话 #${s.id}` }}
                   </div>
                   <div class="session-item-actions shrink-0" :class="sessionId === s.id ? 'opacity-100' : ''">
                     <button type="button" class="session-action-btn" title="重命名" @click="startEditSession(s, $event)">重命名</button>
-                    <button type="button" class="session-action-btn session-action-btn--danger" title="归档" @click="archiveSession(s.id, $event)">归档</button>
                   </div>
                 </div>
                 <div class="session-item-meta">
@@ -590,6 +649,7 @@ onMounted(async () => {
                   </div>
                 </div>
               </div>
+            </div>
               <div v-else class="px-3 py-3 flex flex-col gap-2 bg-white" @click.stop>
                 <input v-model="editingTitle" class="w-full border border-[#363e42]/15 rounded-lg px-3 py-2 text-[13px]" maxlength="200" />
                 <div class="flex gap-2">
@@ -598,7 +658,7 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
-            <p v-if="!chatSessions.length" class="p-6 text-center text-[13px] text-[#4b5563]">暂无会话</p>
+            <p v-if="!chatSessions.length" class="p-4 text-center text-[11px] text-[#64748b]">暂无会话，点击上方新建</p>
           </div>
           <ListPagination
             v-model:page="sessionQuery.page"
@@ -610,15 +670,44 @@ onMounted(async () => {
       </aside>
 
       <div class="flex-1 flex flex-col min-w-0 overflow-hidden session-main">
-        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll">
+        <div class="chat-topbar shrink-0">
+          <button
+            type="button"
+            class="chat-topbar-toggle"
+            :title="sessionSidebarOpen ? '收起会话列表' : '展开会话列表'"
+            @click="sessionSidebarOpen = !sessionSidebarOpen"
+          >
+            <i class="fas" :class="sessionSidebarOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+          </button>
+          <div class="chat-topbar-title-wrap">
+            <h2 class="chat-topbar-title">{{ contextTitle }}</h2>
+            <span v-if="sessionId" class="chat-topbar-session-id" title="当前会话编号">#{{ sessionId }}</span>
+          </div>
+          <div class="health-bar" @click="healthOpen = !healthOpen">
+            <span class="health-bar-title">健康检查</span>
+            <span class="health-bar-summary" :class="health?.all_ok ? 'health-ok' : 'health-warn'">{{ healthSummary }}</span>
+            <button type="button" class="health-refresh" @click.stop="loadPlatformHealth(true)">刷新</button>
+            <span class="health-chevron" :class="{ open: healthOpen }">▾</span>
+          </div>
+          <div v-if="healthOpen" class="health-drop">
+            <p v-if="health?.error" class="health-err">{{ health.error }}</p>
+            <div v-for="it in health?.items || []" :key="it.id" class="health-row" :class="`health-row--${it.status}`">
+              <span class="health-label">{{ it.label }}</span>
+              <span class="health-status">{{ it.status === 'ok' ? '正常' : it.status === 'warn' ? '降级' : '异常' }}</span>
+              <span v-if="it.latency_ms" class="health-lat">{{ it.latency_ms }}ms</span>
+              <p v-if="it.error" class="health-err-line">{{ it.error }}</p>
+            </div>
+          </div>
+        </div>
+        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6 chat-scroll min-h-0">
           <div v-if="messages.length === 0 && !isWaiting" class="h-full flex flex-col items-center justify-center text-[#363e42]/30">
             <p class="font-black tracking-widest uppercase text-xs text-[#363e42]">智能客服 Agent 已就绪</p>
             <p class="text-[11px] font-medium mt-2 opacity-50">基于 RAG 知识库问答，支持流式输出与引用溯源</p>
           </div>
-          <div v-for="(msg, index) in messages" :key="index" class="flex w-full" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+          <div v-for="(msg, index) in messages" :key="index" class="flex w-full min-w-0" :class="msg.role === 'user' ? 'justify-end' : ''">
             <div
               v-if="msg.role === 'user'"
-              class="max-w-[85%] p-4 rounded-2xl shadow-sm border border-[#363e42]/5 text-[13px] whitespace-pre-wrap bg-[#d97706]/10"
+              class="msg-bubble msg-bubble--user"
             >
               <div v-if="msg.image || (msg.attachments && msg.attachments.length)" class="chat-user-attachments">
                 <img v-if="msg.image" :src="msg.image" alt="" class="chat-user-attach-img" />
@@ -630,7 +719,7 @@ onMounted(async () => {
             </div>
             <div
               v-else
-              class="max-w-[85%] p-4 rounded-2xl shadow-sm border border-[#363e42]/5 text-[13px] bg-white"
+              class="w-full min-w-0 assistant-msg-column"
             >
               <ChatAssistantMessage
                 :msg="msg"
@@ -649,7 +738,7 @@ onMounted(async () => {
           </div>
         </div>
         <div class="p-4 bg-white/80 border-t shrink-0">
-          <div class="max-w-4xl mx-auto flex flex-col gap-1">
+          <div class="w-full min-w-0 flex flex-col gap-1">
             <div v-if="pendingUploads.length" class="chat-upload-preview">
               <div v-for="(u, ui) in pendingUploads" :key="ui" class="chat-up-item" :class="u.type">
                 <img v-if="u.preview" :src="u.preview" alt="" />
@@ -668,17 +757,36 @@ onMounted(async () => {
                 </select>
               </label>
             </div>
-            <div class="chat-input-row">
+            <div class="chat-input-row" :class="{ 'chat-input-row--listening': speechInput.listening.value }">
               <textarea
+                ref="inputTextareaRef"
                 v-model="inputText"
                 rows="1"
                 :maxlength="maxQuestionLength"
                 class="chat-input-textarea"
-                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                :placeholder="speechInput.listening.value ? '正在聆听…' : '输入消息，Enter 发送，Shift+Enter 换行'"
                 @keydown="onInputKeydown"
                 @input="adjustTextareaHeight"
               />
               <div class="chat-input-tools">
+                <button
+                  v-if="speechInput.supported.value"
+                  type="button"
+                  class="chat-itool chat-itool--voice"
+                  :class="{ 'is-listening': speechInput.listening.value }"
+                  :title="speechInput.listening.value ? '停止语音输入' : '语音输入'"
+                  :disabled="isWaiting"
+                  @click="toggleVoiceInput"
+                >
+                  <span class="chat-itool-ic" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+                      <path d="M19 10v2a7 7 0 01-14 0v-2" />
+                      <line x1="12" y1="19" x2="12" y2="23" />
+                      <line x1="8" y1="23" x2="16" y2="23" />
+                    </svg>
+                  </span>
+                </button>
                 <label class="chat-itool" title="上传图片">
                   <input ref="imageInputRef" type="file" accept="image/*" multiple class="hidden" @change="pickImages" />
                   <span class="chat-itool-ic" aria-hidden="true">
@@ -696,8 +804,16 @@ onMounted(async () => {
                 </button>
               </div>
             </div>
-            <div class="text-right text-[12px] text-[#363e42]/65 px-1" :class="inputCharCount > maxQuestionLength ? 'text-red-500' : ''">
-              {{ inputCharCount }} / {{ maxQuestionLength }}
+            <p v-if="speechInput.listening.value" class="chat-voice-status">正在聆听，再次点击麦克风可停止</p>
+            <p v-else-if="speechInput.error.value" class="chat-voice-status chat-voice-status--error">{{ speechInput.error.value }}</p>
+            <div class="flex items-center justify-between text-[12px] text-[#363e42]/65 px-1 gap-3">
+              <span v-if="dailyQuota.unlimited" class="chat-quota-hint">今日已提问 {{ dailyQuota.used }} 次（管理员不限次）</span>
+              <span v-else class="chat-quota-hint">
+                今日提问 {{ dailyQuota.used }} / {{ dailyQuota.limit }}（剩余 {{ dailyQuota.remaining }}）
+              </span>
+              <span :class="inputCharCount > maxQuestionLength ? 'text-red-500' : ''">
+                {{ inputCharCount }} / {{ maxQuestionLength }}
+              </span>
             </div>
           </div>
         </div>

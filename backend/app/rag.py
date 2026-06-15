@@ -125,7 +125,9 @@ def build_prompt_messages(
     hist = _format_history_block(history)
     system = (
         "你是企业智能客服。只能依据知识库片段回答，不得编造。\n"
-        "若资料不足请明确说明无法回答。\n\n"
+        "若资料不足请明确说明无法回答。\n"
+        "回答中插图须紧扣用户问题：仅插入与问题相关的 picture 块（仅 url，不带 description），"
+        "并用结合问题的简短说明点明图中关键位置（可引用 description 中的区块/标记编号）。\n\n"
         + cite_instr
     )
     user = f"意图:{intent}\n历史:\n{hist or '无'}\n\n{rag_context}\n\n问题:{query}"

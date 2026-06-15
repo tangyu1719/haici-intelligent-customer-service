@@ -79,6 +79,8 @@ class SessionUpdateRequest(BaseModel):
 
 
 class SessionDetailResponse(SessionListItem):
+    status: int = 1
+    user_id: int | None = None
     messages: list["MessageItem"] = []
 
 

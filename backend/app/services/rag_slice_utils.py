@@ -61,6 +61,27 @@ def normalize_rag_slices_from_docs(docs: list[Document], *, max_slices: int = 8)
     return normalize_rag_slices(hits, max_slices=max_slices)
 
 
+def picture_answer_rules() -> str:
+    """供 RAG / 防稀释等多条回答链路复用的插图规则。"""
+    return _picture_answer_rules()
+
+
+def _picture_answer_rules() -> str:
+    return "\n".join(
+        [
+            "四、含图切片与正文插图（picture 块 · 必须遵守）",
+            "  · 切片中的 {picture_id:…; url:…; description:…} 中，description 与 picture_id 仅供你理解画面，"
+            "禁止原文出现在用户可见正文中（前端不展示这两项）。",
+            "  · 仅当某张图与用户问题**直接相关**时，才在对应步骤文字之后另起一行插入插图标记，格式：",
+            "    {picture_id:图N-xxx; url:切片中的绝对路径;}",
+            "    （不要带 description 字段；无关图片一律不插。）",
+            "  · 插图前须用**一两句话**结合用户问题说明该图作用；可保留 description 里的**位置指示**"
+            "（如「区块(1)」「第一处标记」「左侧按钮」），但禁止整段照搬 description/OCR 全文。",
+            "  · 正文中不要写「见下图」「如上图所示」等空泛指代而不插图的句子。",
+        ]
+    )
+
+
 def _citation_format_block() -> str:
     return "\n".join(
         [
@@ -79,6 +100,7 @@ def _citation_format_block() -> str:
             "    1 处逻辑链路：摘录切片【1】原文「…关键句…」；因原文…，故正文第1句写成…。置信度：100",
             "  · 置信度为 0–100 整数。",
             "三、禁止编造未出现在切片中的事实。",
+            _picture_answer_rules(),
         ]
     )
 

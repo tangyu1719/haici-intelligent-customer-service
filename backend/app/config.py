@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     USER_NO_HASH_SECRET: str = os.getenv("USER_NO_HASH_SECRET", "")
 
     DAILY_QUESTION_LIMIT: int = int(os.getenv("DAILY_QUESTION_LIMIT", "100"))
+    # 管理员每日上限；0 表示不限次（仍会计数）
+    DAILY_QUESTION_LIMIT_ADMIN: int = int(os.getenv("DAILY_QUESTION_LIMIT_ADMIN", "0"))
     MAX_QUESTION_LENGTH: int = int(os.getenv("MAX_QUESTION_LENGTH", "500"))
     # 模型上下文窗口（字符级预算，可按接入点 max_tokens 换算调整）
     CHAT_MAX_CONTEXT_CHARS: int = int(os.getenv("CHAT_MAX_CONTEXT_CHARS", str(256 * 1024)))

@@ -219,6 +219,28 @@ def sync_agent_settings_menu(db: Session) -> None:
     db.commit()
 
 
+def sync_system_rbac_menu(db: Session) -> None:
+    """系统管理：用户权限 RBAC。"""
+    parent = db.query(SysMenu).filter(SysMenu.id == 130).first()
+    if not parent:
+        db.add(SysMenu(id=130, parent_id=0, menu_type="M", name="系统管理", path="", component="", permission=None, sort_order=95, platform="haici"))
+    else:
+        parent.name = "系统管理"; parent.menu_type = "M"; parent.parent_id = 0; parent.sort_order = 95
+    child = db.query(SysMenu).filter(SysMenu.id == 131).first()
+    if not child:
+        db.add(SysMenu(id=131, parent_id=130, menu_type="C", name="用户权限", path="/admin/users", component="AdminUsersView", permission="system:rbac:users", sort_order=1, platform="haici"))
+    else:
+        child.parent_id = 130; child.menu_type = "C"; child.name = "用户权限"; child.path = "/admin/users"
+        child.component = "AdminUsersView"; child.permission = "system:rbac:users"; child.sort_order = 1
+    admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
+    if admin:
+        for mid in (130, 131):
+            exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
+            if not exists:
+                db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))
+    db.commit()
+
+
 def seed_menus(db: Session) -> None:
     if db.query(SysMenu).first():
         return

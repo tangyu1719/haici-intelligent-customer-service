@@ -23,6 +23,7 @@ from langchain_core.documents import Document
 
 from app.config import settings
 from app.llms import get_llm
+from app.services.rag_slice_utils import picture_answer_rules
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +220,8 @@ def _build_anti_dilution_context(
         "1. 优先引用上述「优先规则」列表中的条款\n"
         "2. 若多个文档存在冲突规则，明确指出差异并建议以最新/最权威的文档为准\n"
         "3. 每一步推断必须对应一个具体的切片编号\n"
-        "4. 不要合并或混淆来自不同文档的规则"
+        "4. 不要合并或混淆来自不同文档的规则\n"
+        + picture_answer_rules()
     )
 
     return "\n".join(parts), cite_instr

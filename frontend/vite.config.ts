@@ -13,9 +13,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://127.0.0.1:8012', changeOrigin: true },
-    },
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
+      '/output': { target: 'http://127.0.0.1:8012', changeOrigin: true },
     },
   },
   build: {

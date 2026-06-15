@@ -149,7 +149,12 @@ def get_session_detail(session_id: int, db: Session = Depends(get_db), current_u
     msg_qry = ListQuery(page=1, size=50, sort_by="created_at", sort_order="asc")
     mq = _messages_query(db, session_id, msg_qry)
     rows, _ = paginate(mq, msg_qry)
-    return SessionDetailResponse(**base.model_dump(), messages=[_message_item(m) for m in rows])
+    return SessionDetailResponse(
+        **base.model_dump(),
+        status=session.status,
+        user_id=session.user_id,
+        messages=[_message_item(m) for m in rows],
+    )
 
 
 @router.get("/{session_id}/messages", response_model=MessagePageResponse)

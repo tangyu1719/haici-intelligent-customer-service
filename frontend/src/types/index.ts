@@ -55,6 +55,8 @@ export interface ChatMessage {
     retrieval_terms?: string[]
     rag_query?: string
   }
+  /** 助手消息落库/完成时间（ISO） */
+  createdAt?: string
 }
 
 export interface FeedbackContextSnapshot {
@@ -185,6 +187,22 @@ export interface ChatSessionItem {
   updated_at?: string
   message_count?: number
   meta?: SessionMetaSummary | null
+}
+
+export interface ChatMessageItem {
+  id: number
+  role: string
+  content: string
+  intent_label?: string | null
+  citations?: Record<string, unknown>[] | null
+  created_at: string
+}
+
+export interface ChatSessionDetail extends ChatSessionItem {
+  status?: number
+  user_id?: number
+  message_count: number
+  messages?: ChatMessageItem[]
 }
 
 export interface KnowledgeDoc {

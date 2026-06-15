@@ -11,6 +11,7 @@ from app.routers import (
     admin_eval,
     admin_feedback,
     admin_logs,
+    admin_rbac,
     agent_settings,
     auth,
     chat,
@@ -49,6 +50,7 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin_logs.router, prefix="/api/v1")
 app.include_router(admin_feedback.router, prefix="/api/v1")
 app.include_router(admin_eval.router, prefix="/api/v1")
+app.include_router(admin_rbac.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(knowledge_base.router, prefix="/api/v1")

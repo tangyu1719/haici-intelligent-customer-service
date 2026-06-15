@@ -1,4 +1,5 @@
 import type { ChatMessage, RagCitationAnnotation, RagCitationSlice } from '../types'
+import { fixDisplayFilename, fixMojibakeText } from './filename'
 
 export function splitAnswerBodyAndCitations(text: string): {
   body: string
@@ -43,9 +44,9 @@ export function parseSlicesFromMarkdown(section: string): RagCitationSlice[] {
     if (!parentPath && parentM?.[2]) parentPath = String(parentM[2]).trim()
     out.push({
       ref_id: Number(m[1]),
-      parent_name: parentM ? String(parentM[1]).trim() : '知识库片段',
-      source_file: parentPath,
-      slice_content: (sliceM ? sliceM[1] : block).trim(),
+      parent_name: fixDisplayFilename(parentM ? String(parentM[1]).trim() : '知识库片段'),
+      source_file: fixDisplayFilename(parentPath),
+      slice_content: fixMojibakeText((sliceM ? sliceM[1] : block).trim()),
     })
   }
   return out
@@ -67,14 +68,14 @@ export function parseAnnotationsFromMarkdown(section: string): RagCitationAnnota
 
 export function prefetchSliceToCitation(sl: Record<string, unknown>, fallbackIndex = 0): RagCitationSlice | null {
   if (!sl || typeof sl !== 'object') return null
-  const parent = String(sl.parent_name || sl.parent_document || sl.title || '知识库片段')
+  const parent = fixDisplayFilename(String(sl.parent_name || sl.parent_document || sl.title || '知识库片段'))
   let refId = Number(sl.ref_id)
   if (!Number.isFinite(refId) || refId < 1) refId = fallbackIndex + 1
   return {
     ref_id: refId,
     parent_name: parent,
-    source_file: String(sl.source_file || '').trim(),
-    slice_content: String(sl.content || sl.slice_content || sl.snippet || '').trim(),
+    source_file: fixDisplayFilename(String(sl.source_file || '').trim()),
+    slice_content: fixMojibakeText(String(sl.content || sl.slice_content || sl.snippet || '').trim()),
     score: typeof sl.score === 'number' ? sl.score : undefined,
   }
 }

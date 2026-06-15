@@ -33,6 +33,27 @@ def assign_role(db: Session, user_id: int, role_code: str) -> None:
         db.commit()
 
 
+def set_user_roles(db: Session, user_id: int, role_codes: list[str]) -> list[str]:
+    """替换用户角色，至少保留 viewer。"""
+    wanted = {c.strip() for c in role_codes if c and c.strip()}
+    if not wanted:
+        wanted = {"viewer"}
+    roles = db.query(RbacRole).filter(RbacRole.code.in_(wanted), RbacRole.status == 1).all()
+    if not roles:
+        fallback = db.query(RbacRole).filter(RbacRole.code == "viewer").first()
+        roles = [fallback] if fallback else []
+    db.query(RbacUserRole).filter(RbacUserRole.user_id == user_id).delete()
+    for role in roles:
+        db.add(RbacUserRole(user_id=user_id, role_id=role.id))
+    db.commit()
+    return [r.code for r in roles]
+
+
+def list_all_roles(db: Session) -> list[dict]:
+    rows = db.query(RbacRole).filter(RbacRole.status == 1).order_by(RbacRole.id).all()
+    return [{"code": r.code, "name": r.name} for r in rows]
+
+
 def enforce_api(roles: list[str], path: str, method: str) -> bool:
     return casbin_enforce_api(roles, path, method)
 

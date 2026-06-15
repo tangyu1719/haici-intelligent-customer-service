@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { authHeaders } from '../api/auth'
 import type { ChatMessage, FeedbackSubmitPayload, IntentAlternativesResponse } from '../types'
 import { INTENT_LABELS, intentDisplay } from '../utils/intentLabels'
+import { handleKbPictureClick } from '../utils/kbPictureActions'
 import {
   answerBodyForMsg,
   hydrateMsgCitations,
   ragCitationAnnotationsForMsg,
   ragCitationSlicesForMsg,
 } from '../utils/ragCitations'
-import { renderMarkdown, renderStreamingText } from '../utils/renderMarkdown'
+import { renderMarkdown, renderSliceContent, renderStreamingText, renderAnnotationContent, citeSliceDomId } from '../utils/renderMarkdown'
 
 const props = defineProps<{
   msg: ChatMessage
@@ -23,8 +24,98 @@ const emit = defineEmits<{
   followUp: [text: string]
 }>()
 
-const slicesOpen = ref(true)
-const annoOpen = ref(true)
+const slicesOpen = ref(false)
+const annoOpen = ref(false)
+const sliceDetailOpen = ref<Record<number, boolean>>({})
+const lightboxSrc = ref('')
+
+const sliceHtmlCache = new Map<string, string>()
+
+watch(
+  () => props.msg.messageId,
+  () => {
+    sliceHtmlCache.clear()
+    sliceDetailOpen.value = {}
+  },
+)
+
+const slices = computed(() => ragCitationSlicesForMsg(props.msg))
+
+const annotations = computed(() => ragCitationAnnotationsForMsg(props.msg))
+
+const messageScope = computed(() => String(props.msg.messageId ?? props.contextId ?? 'draft'))
+
+// 流式结束后一次性解析引用，避免 computed 内重复 hydrate
+watch(
+  () => [props.msg.messageId, props.msg.isStreaming] as const,
+  () => {
+    if (!props.msg.isStreaming) hydrateMsgCitations(props.msg)
+  },
+  { immediate: true },
+)
+
+const bodyHtml = computed(() => {
+  const raw = answerBodyForMsg(props.msg)
+  if (!raw && !props.msg.isStreaming) return ''
+  const opts = {
+    messageId: props.msg.messageId ?? null,
+    messageScope: messageScope.value,
+    citationSlices: slices.value,
+  }
+  if (props.msg.isStreaming) return renderStreamingText(raw, opts)
+  return renderMarkdown(raw, opts)
+})
+
+const getAnnotationHtml = (text: string): string => {
+  const key = `${messageScope.value}:anno:${text.slice(0, 48)}`
+  const cached = sliceHtmlCache.get(key)
+  if (cached) return cached
+  const html = renderAnnotationContent(text, messageScope.value)
+  sliceHtmlCache.set(key, html)
+  return html
+}
+
+const getSliceHtml = (refId: number, content: string): string => {
+  const key = `${messageScope.value}:${refId}`
+  const cached = sliceHtmlCache.get(key)
+  if (cached) return cached
+  const html = renderSliceContent(content, messageScope.value)
+  sliceHtmlCache.set(key, html)
+  return html
+}
+
+const citeSliceId = (refId: number): string => citeSliceDomId(messageScope.value, refId)
+
+const isSliceDetailOpen = (refId: number): boolean => sliceDetailOpen.value[refId] === true
+
+const toggleSliceDetail = (refId: number, open?: boolean): void => {
+  sliceDetailOpen.value[refId] = open ?? !isSliceDetailOpen(refId)
+}
+
+const onCitationClick = (e: MouseEvent): void => {
+  if (handleKbPictureClick(e, (src) => { lightboxSrc.value = src })) return
+  const a = (e.target as HTMLElement).closest('a.rag-cite-link') as HTMLAnchorElement | null
+  if (!a?.hash) return
+  e.preventDefault()
+  const id = a.hash.slice(1)
+  const el = document.getElementById(id)
+  if (!el) return
+  slicesOpen.value = true
+  const refMatch = id.match(/-(\d+)$/)
+  if (refMatch) sliceDetailOpen.value[Number(refMatch[1])] = true
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  el.classList.add('rag-cite-item--highlight')
+  window.setTimeout(() => el.classList.remove('rag-cite-item--highlight'), 1800)
+}
+
+const onSliceContentClick = (e: MouseEvent): void => {
+  if (handleKbPictureClick(e, (src) => { lightboxSrc.value = src })) return
+  onCitationClick(e)
+}
+
+const closeLightbox = (): void => {
+  lightboxSrc.value = ''
+}
 const intentLiked = ref<boolean | null>(null)
 const starRating = ref(0)
 const hoverStar = ref(0)
@@ -47,24 +138,23 @@ const selectedLabel = ref('')
 const customIntentText = ref('')
 const suggestionsShown = ref<string[]>([])
 
-const slices = computed(() => {
-  hydrateMsgCitations(props.msg)
-  return ragCitationSlicesForMsg(props.msg)
-})
-
-const annotations = computed(() => {
-  hydrateMsgCitations(props.msg)
-  return ragCitationAnnotationsForMsg(props.msg)
-})
-
-const bodyHtml = computed(() => {
-  const raw = answerBodyForMsg(props.msg)
-  if (!raw && !props.msg.isStreaming) return ''
-  if (props.msg.isStreaming) return renderStreamingText(raw)
-  return renderMarkdown(raw)
-})
-
 const intentText = computed(() => intentDisplay(props.msg.intent, props.msg.intentLabel))
+
+const answerTime = computed((): string => {
+  const s = props.msg.createdAt
+  if (!s) return ''
+  const d = new Date(s)
+  if (Number.isNaN(d.getTime())) return ''
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${mm}/${dd} ${hh}:${mi}`
+})
+
+const showMsgMeta = computed(
+  () => !!(props.msg.intent || props.msg.intentLabel) || (!props.msg.isStreaming && !!answerTime.value),
+)
 
 const fallbackBuiltin = computed(() =>
   Object.entries(INTENT_LABELS)
@@ -311,107 +401,139 @@ const applyCustomIntent = (): void => {
 
 <template>
   <div class="assistant-msg-wrap">
-    <div
-      v-if="msg.content || msg.isStreaming"
-      class="msg-bubble chat-prose"
-      :class="{ 'is-streaming': msg.isStreaming }"
-      v-html="bodyHtml"
-    />
+    <Teleport to="body">
+      <div v-if="lightboxSrc" class="kb-lightbox" @click="closeLightbox">
+        <div class="kb-lightbox-inner" @click.stop>
+          <button type="button" class="kb-lightbox-close" title="关闭" @click="closeLightbox">✕</button>
+          <img class="kb-lightbox-img" :src="lightboxSrc" alt="" />
+        </div>
+      </div>
+    </Teleport>
 
-    <div v-if="!msg.isStreaming && slices.length" class="msg-rag-cite-wrap">
-      <div class="web-search-panel rag-cite-panel">
-        <div class="rag-panel-hd">
-          <span class="web-search-hd">文献切片明细 · {{ slices.length }} 条</span>
-          <button type="button" class="rag-panel-toggle" @click="toggleSlices">
-            {{ slicesOpen ? '收起 ▲' : '展开 ▼' }}
+    <div class="msg-answer-card msg-bubble msg-bubble--assistant">
+      <div v-if="showMsgMeta" class="msg-meta-row">
+        <span v-if="msg.intent || msg.intentLabel" class="msg-meta-intent">意图识别：{{ intentText }}</span>
+        <span v-if="answerTime && !msg.isStreaming" class="msg-meta-time">回答时间 {{ answerTime }}</span>
+      </div>
+
+      <div
+        v-if="msg.content || msg.isStreaming"
+        class="chat-prose"
+        :class="{ 'is-streaming': msg.isStreaming }"
+        v-html="bodyHtml"
+        @click="onCitationClick"
+      />
+
+      <div v-if="!msg.isStreaming && slices.length" class="msg-rag-cite-wrap">
+        <div class="rag-cite-panel-flat">
+          <div class="rag-cite-bar rag-cite-bar--panel rag-cite-bar--flat">
+            <span class="rag-cite-bar-title">文献切片明细 · {{ slices.length }} 条</span>
+            <button type="button" class="rag-cite-bar-action rag-cite-bar-action--text" @click="toggleSlices">
+              {{ slicesOpen ? '收起 ▲' : '展开 ▼' }}
+            </button>
+          </div>
+          <ol v-if="slicesOpen" class="web-search-list rag-cite-list">
+            <li
+              v-for="sl in slices"
+              :key="'cite-s-' + sl.ref_id + '-' + (sl.source_file || sl.parent_name)"
+              :id="citeSliceId(sl.ref_id)"
+              class="web-search-item rag-cite-item"
+            >
+              <div
+                class="rag-cite-bar rag-cite-bar--item"
+                :class="{ 'rag-cite-bar--item-only': !isSliceDetailOpen(sl.ref_id) }"
+              >
+                <span class="rag-cite-bar-title">
+                  <span class="rag-ref-tag">[{{ sl.ref_id }}]</span>
+                  <span class="rag-cite-bar-name">{{ sl.parent_name }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="rag-cite-bar-action"
+                  @click="toggleSliceDetail(sl.ref_id)"
+                >
+                  {{ isSliceDetailOpen(sl.ref_id) ? '收起 ▲' : '展开 ▼' }}
+                </button>
+              </div>
+              <div v-if="sl.source_file" class="rag-cite-meta web-search-url">父文档路径：{{ sl.source_file }}</div>
+              <div v-if="isSliceDetailOpen(sl.ref_id)" class="rag-cite-expanded">
+                <div
+                  class="rag-cite-body rag-cite-body--rich"
+                  v-html="getSliceHtml(sl.ref_id, sl.slice_content)"
+                  @click="onSliceContentClick"
+                />
+              </div>
+              <span v-if="sl.score != null" class="rag-cite-score">score {{ Number(sl.score).toFixed(4) }}</span>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <div v-if="!msg.isStreaming && annotations.length" class="msg-rag-cite-wrap">
+        <div class="rag-cite-panel-flat">
+          <div class="rag-cite-bar rag-cite-bar--panel rag-cite-bar--flat">
+            <span class="rag-cite-bar-title">注释 · {{ annotations.length }} 条</span>
+            <button type="button" class="rag-cite-bar-action rag-cite-bar-action--text" @click="toggleAnno">
+              {{ annoOpen ? '收起 ▲' : '展开 ▼' }}
+            </button>
+          </div>
+          <ol v-if="annoOpen" class="web-search-list rag-cite-list rag-anno-list">
+            <li
+              v-for="an in annotations"
+              :key="'cite-a-' + an.index"
+              class="web-search-item rag-cite-item rag-anno-item"
+            >
+              <div class="rag-anno-head">注释 {{ an.index }}</div>
+              <div
+                class="rag-cite-body rag-anno-body chat-prose"
+                v-html="getAnnotationHtml(an.text)"
+                @click="onCitationClick"
+              />
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <div v-if="!msg.isStreaming && msg.followUps?.length" class="follow-up-block">
+        <p class="follow-up-title">你可能还想问</p>
+        <div class="follow-up-chips">
+          <button
+            v-for="(q, idx) in msg.followUps"
+            :key="'fu-' + idx + '-' + q.slice(0, 12)"
+            type="button"
+            class="follow-up-chip"
+            @click="emit('followUp', q)"
+          >
+            {{ q }}
           </button>
         </div>
-        <ol v-show="slicesOpen" class="web-search-list rag-cite-list">
-          <li
-            v-for="sl in slices"
-            :key="'cite-s-' + sl.ref_id + '-' + (sl.source_file || sl.parent_name)"
-            class="web-search-item rag-cite-item"
-          >
-            <div class="web-search-item-title">
-              <span class="rag-ref-tag">[{{ sl.ref_id }}]</span>
-              {{ sl.parent_name }}
-            </div>
-            <div v-if="sl.source_file" class="web-search-url">父文档路径：{{ sl.source_file }}</div>
-            <details class="rag-cite-details" open>
-              <summary class="rag-cite-summary">切片全文（可展开）</summary>
-              <pre class="rag-cite-body">{{ sl.slice_content }}</pre>
-            </details>
-            <span v-if="sl.score != null" class="rag-cite-score">score {{ Number(sl.score).toFixed(4) }}</span>
-          </li>
-        </ol>
       </div>
     </div>
 
-    <div v-if="!msg.isStreaming && annotations.length" class="msg-rag-cite-wrap">
-      <div class="web-search-panel rag-cite-panel rag-anno-panel">
-        <div class="rag-panel-hd">
-          <span class="web-search-hd">注释 · {{ annotations.length }} 条</span>
-          <button type="button" class="rag-panel-toggle" @click="toggleAnno">
-            {{ annoOpen ? '收起 ▲' : '展开 ▼' }}
-          </button>
-        </div>
-        <ol v-show="annoOpen" class="web-search-list rag-cite-list">
-          <li
-            v-for="an in annotations"
-            :key="'cite-a-' + an.index"
-            class="web-search-item rag-cite-item rag-anno-item"
-          >
-            <div class="web-search-item-title">注释 {{ an.index }}</div>
-            <details class="rag-cite-details" open>
-              <summary class="rag-cite-summary">逻辑链路与置信度（可展开）</summary>
-              <pre class="rag-cite-body">{{ an.text }}</pre>
-            </details>
-          </li>
-        </ol>
-      </div>
-    </div>
-
-    <div v-if="!msg.isStreaming && msg.followUps?.length" class="follow-up-block">
-      <p class="follow-up-title">你可能还想问</p>
-      <div class="follow-up-chips">
-        <button
-          v-for="(q, idx) in msg.followUps"
-          :key="'fu-' + idx + '-' + q.slice(0, 12)"
-          type="button"
-          class="follow-up-chip"
-          @click="emit('followUp', q)"
-        >
-          {{ q }}
-        </button>
-      </div>
-    </div>
-
-    <div v-if="!msg.isStreaming && msg.messageId" class="msg-feedback-block">
+    <div v-if="!msg.isStreaming && msg.messageId" class="msg-feedback-card">
       <div v-if="msg.intent || msg.intentLabel" class="intent-feedback-row">
         <div class="intent-feedback-head">
-          <span class="intent-label">意图识别：{{ intentText }}</span>
-          <div class="intent-feedback-actions">
-            <span class="intent-like-hint">如果觉得 AI 理解准确的话，请别吝啬你的赞！</span>
-            <div class="intent-like-btns">
-              <button
-                type="button"
-                class="intent-like-btn"
-                :class="{ active: intentLiked === true, success: intentSubmitted && intentLiked === true }"
-                :disabled="intentSubmitting || (intentSubmitted && intentLiked === true)"
-                @click="setIntentLike(true)"
-              >
-                {{ intentSubmitting && intentLiked === true ? '提交中…' : intentSubmitted && intentLiked === true ? '已评价' : '👍 理解准确' }}
-              </button>
-              <button
-                type="button"
-                class="intent-like-btn dislike"
-                :class="{ active: intentLiked === false }"
-                :disabled="intentSubmitting"
-                @click="setIntentLike(false)"
-              >
-                👎 理解有误
-              </button>
-            </div>
+          <span v-if="msg.intent || msg.intentLabel" class="intent-label">意图识别：{{ intentText }}</span>
+          <span class="intent-like-hint">如果觉得 AI 理解准确的话，请别吝啬你的赞！</span>
+          <div class="intent-like-btns">
+            <button
+              type="button"
+              class="intent-like-btn"
+              :class="{ active: intentLiked === true, success: intentSubmitted && intentLiked === true }"
+              :disabled="intentSubmitting || (intentSubmitted && intentLiked === true)"
+              @click="setIntentLike(true)"
+            >
+              {{ intentSubmitting && intentLiked === true ? '提交中…' : intentSubmitted && intentLiked === true ? '已评价' : '👍 理解准确' }}
+            </button>
+            <button
+              type="button"
+              class="intent-like-btn dislike"
+              :class="{ active: intentLiked === false }"
+              :disabled="intentSubmitting"
+              @click="setIntentLike(false)"
+            >
+              👎 理解有误
+            </button>
           </div>
         </div>
         <p v-if="intentError" class="submit-error intent-inline-error">{{ intentError }}</p>
@@ -535,35 +657,47 @@ const applyCustomIntent = (): void => {
 .assistant-msg-wrap {
   width: 100%;
 }
-.rag-panel-hd {
+.msg-answer-card {
+  width: 100%;
+}
+.msg-meta-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(54, 62, 66, 0.1);
 }
-.rag-panel-hd .web-search-hd {
-  margin-bottom: 0;
+.msg-meta-intent {
+  font-size: 11px;
+  font-weight: 700;
+  color: #d97706;
 }
-.rag-panel-toggle {
-  font-size: 10px;
+.msg-meta-time {
+  font-size: 11px;
   font-weight: 600;
   color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid rgba(54, 62, 66, 0.12);
-  border-radius: 8px;
-  padding: 4px 10px;
-  cursor: pointer;
-  white-space: nowrap;
+  margin-left: auto;
 }
-.rag-panel-toggle:hover {
-  color: #2563eb;
-  border-color: rgba(37, 99, 235, 0.25);
-}
-.msg-feedback-block {
+.msg-feedback-card {
   margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed rgba(54, 62, 66, 0.12);
+  width: 50%;
+  max-width: 100%;
+  min-width: 280px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(54, 62, 66, 0.2);
+  box-shadow:
+    0 2px 10px rgba(15, 23, 42, 0.07),
+    0 0 0 1px rgba(148, 163, 184, 0.22);
+}
+@media (max-width: 768px) {
+  .msg-feedback-card {
+    width: 100%;
+  }
 }
 .follow-up-block {
   margin-top: 12px;
@@ -605,37 +739,36 @@ const applyCustomIntent = (): void => {
 .intent-feedback-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 10px;
+  flex-wrap: nowrap;
+  width: 100%;
+  min-width: 0;
 }
 .intent-label {
   font-size: 11px;
   font-weight: 700;
   color: #d97706;
   flex-shrink: 0;
-}
-.intent-feedback-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  flex: 1;
-  min-width: 0;
+  white-space: nowrap;
 }
 .intent-like-hint {
   font-size: 10px;
   color: #64748b;
   margin: 0;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
-}
-.intent-inline-error {
-  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .intent-like-btns {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.intent-inline-error {
+  margin-top: 6px;
 }
 .intent-like-btn {
   font-size: 11px;
@@ -748,10 +881,9 @@ const applyCustomIntent = (): void => {
   color: #15803d;
 }
 .satisfaction-block {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #fafafa;
-  border: 1px solid rgba(54, 62, 66, 0.08);
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(54, 62, 66, 0.08);
 }
 .satisfaction-title {
   font-size: 11px;

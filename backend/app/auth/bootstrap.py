@@ -16,6 +16,7 @@ from app.auth.seed import (
     sync_profile_menu_group,
     sync_feedback_menu,
     sync_log_menu_group,
+    sync_system_rbac_menu,
 )
 from app.auth.casbin_enforcer import seed_casbin_policies
 from app.database import SessionLocal, engine
@@ -139,6 +140,7 @@ def ensure_auth_ready() -> None:
         sync_knowledge_menu_group(db)
         sync_profile_menu_group(db)
         sync_agent_settings_menu(db)
+        sync_system_rbac_menu(db)
         backfill_user_no(db)
         ensure_bootstrap_admin(db)
         ensure_admin_user(db)
