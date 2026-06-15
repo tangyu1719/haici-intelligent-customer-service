@@ -40,6 +40,24 @@ const selectedProvider = ref<ProviderDef>(PROVIDERS[0])
 const providerLabel = (p: string) => PROVIDERS.find(x => x.key === p)?.label || p
 const statusLabel = (s: string) => ({ active: '启用', disabled: '禁用', degraded: '降级' } as Record<string,string>)[s] || s
 
+// 兜底话术
+const fallbackText = ref('')
+const fallbackMsg = ref('')
+async function loadFallback() {
+  try {
+    const r = await fetch('/api/v1/system/settings/fallback', { headers: authHeaders() })
+    if (r.ok) fallbackText.value = (await r.json()).content || ''
+  } catch {}
+}
+async function saveFallback() {
+  fallbackMsg.value = ''
+  const r = await fetch('/api/v1/system/settings/fallback', {
+    method: 'PUT', headers: authHeaders(),
+    body: JSON.stringify({ content: fallbackText.value }),
+  })
+  fallbackMsg.value = r.ok ? '保存成功' : '保存失败'
+}
+
 watch(() => editingNode.value?.provider, (prov) => {
   const def = PROVIDERS.find(p => p.key === prov)
   if (!def || !editingNode.value) return
@@ -153,7 +171,7 @@ async function saveRouting() {
   routingMsg.value = r.ok ? '路由规则已保存' : '保存失败'
 }
 
-onMounted(() => { loadNodes(); loadHealth(); loadRouting() })
+onMounted(() => { loadNodes(); loadHealth(); loadRouting(); loadFallback() })
 </script>
 
 <template>
@@ -293,6 +311,23 @@ onMounted(() => { loadNodes(); loadHealth(); loadRouting() })
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- ═══ 系统兜底话术配置 ═══ -->
+      <div class="mt-6 border-t pt-6">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h3 class="text-[14px] font-bold">兜底话术模板</h3>
+            <p class="text-[10px] text-[#64748b]">当检索不到知识库内容时返回给用户的礼貌回复，可在此编辑（运行时生效）</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span v-if="fallbackMsg" class="text-[11px] font-bold" :class="fallbackMsg.includes('失败')?'text-red-500':'text-green-600'">{{ fallbackMsg }}</span>
+            <button class="bg-[#2563eb] text-white px-4 py-1.5 rounded-lg text-[11px] font-bold" @click="saveFallback">保存</button>
+          </div>
+        </div>
+        <textarea v-model="fallbackText" rows="6"
+          class="w-full border rounded-lg p-3 text-[12px] leading-relaxed resize-y"
+          placeholder="兜底话术模板..." />
       </div>
     </div>
   </div>
