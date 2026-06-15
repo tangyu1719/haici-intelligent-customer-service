@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { authHeaders } from '../../api/auth'
 import ListPagination from '../ListPagination.vue'
 import ListQueryBar from '../ListQueryBar.vue'
+import LogContentZoomModal from './LogContentZoomModal.vue'
 import LogScrollDetail from './LogScrollDetail.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../../utils/listQuery'
 
@@ -33,6 +34,11 @@ const extraApiType = ref('')
 const extraSuccess = ref('')
 const extraExecuteState = ref('')
 const extraTraceId = ref('')
+
+const cellZoomOpen = ref(false)
+const cellZoomTitle = ref('')
+const cellZoomValue = ref('')
+const cellZoomMono = ref(false)
 
 const detailOpen = ref(false)
 const detailLoading = ref(false)
@@ -152,12 +158,46 @@ function fmtApiType(v: unknown): string {
   return map[s] || s || '-'
 }
 
-function cellText(row: LogRow, col: { key: string; fmt?: (v: unknown) => string }): string {
+type ListCol = { key: string; label: string; wide?: boolean; fmt?: (v: unknown) => string }
+
+function fullCellText(row: LogRow, col: { key: string; fmt?: (v: unknown) => string }): string {
   const raw = row[col.key]
   if (col.fmt) return col.fmt(raw)
   if (raw == null || raw === '') return '-'
-  const s = String(raw)
+  return String(raw)
+}
+
+function cellText(row: LogRow, col: { key: string; fmt?: (v: unknown) => string }): string {
+  const s = fullCellText(row, col)
   return s.length > 80 ? `${s.slice(0, 80)}…` : s
+}
+
+function openCellZoom(title: string, value: string, mono = false): void {
+  cellZoomTitle.value = title
+  cellZoomValue.value = value
+  cellZoomMono.value = mono
+  cellZoomOpen.value = true
+}
+
+function openTableCellZoom(row: LogRow, col: ListCol): void {
+  openCellZoom(
+    col.label,
+    fullCellText(row, col),
+    col.key.includes('url') || col.key === 'trace_id',
+  )
+}
+
+function closeCellZoom(): void {
+  cellZoomOpen.value = false
+}
+
+function detailFieldText(v: unknown): string {
+  if (v == null || v === '') return '—'
+  return String(v)
+}
+
+function openDetailFieldZoom(label: string, v: unknown, mono = false): void {
+  openCellZoom(label, detailFieldText(v), mono)
 }
 
 function buildExtras(): Record<string, string | undefined> {
@@ -375,7 +415,14 @@ onMounted(loadList)
           </thead>
           <tbody>
             <tr v-for="row in rows" :key="String(row.log_id)">
-              <td v-for="col in listColumns" :key="col.key" :class="{ wide: col.wide, mono: col.key.includes('url') || col.key === 'trace_id' }" :title="String(row[col.key] ?? '')">
+              <td
+                v-for="col in listColumns"
+                :key="col.key"
+                class="clickable-cell"
+                :class="{ wide: col.wide, mono: col.key.includes('url') || col.key === 'trace_id' }"
+                title="点击放大查看"
+                @click="openTableCellZoom(row, col)"
+              >
                 {{ cellText(row, col) }}
               </td>
               <td class="col-action">
@@ -388,6 +435,14 @@ onMounted(loadList)
       </div>
       <ListPagination v-model:page="query.page" v-model:size="query.size" :total="total" />
     </div>
+
+    <LogContentZoomModal
+      :open="cellZoomOpen"
+      :title="cellZoomTitle"
+      :value="cellZoomValue"
+      :mono="cellZoomMono"
+      @close="closeCellZoom"
+    />
 
     <!-- 详情抽屉 -->
     <div v-if="detailOpen" class="log-detail-mask" @click.self="closeDetail">
@@ -410,30 +465,30 @@ onMounted(loadList)
           <section class="detail-section">
             <h4>基本信息</h4>
             <dl class="detail-dl">
-              <div><dt>客户端 IP</dt><dd>{{ detailRow?.client_ip || '—' }}</dd></div>
-              <div><dt>操作描述</dt><dd>{{ detailRow?.operate_desc || '—' }}</dd></div>
-              <div><dt>模块</dt><dd>{{ detailRow?.module || '—' }}</dd></div>
-              <div><dt>菜单权限</dt><dd class="mono">{{ detailRow?.menu_permission || '—' }}</dd></div>
-              <div><dt>操作人</dt><dd>{{ detailRow?.user_no || '—' }} <span v-if="detailRow?.user_id" class="muted">(ID {{ detailRow.user_id }})</span></dd></div>
-              <div><dt>操作流水号</dt><dd class="mono">{{ detailRow?.operate_no || '—' }}</dd></div>
-              <div><dt>追踪 ID</dt><dd class="mono">{{ detailRow?.trace_id || '—' }}</dd></div>
-              <div><dt>请求方法</dt><dd>{{ detailRow?.method || '—' }}</dd></div>
-              <div><dt>耗时</dt><dd>{{ detailRow?.time_consume_ms ?? '—' }} ms</dd></div>
-              <div><dt>状态</dt><dd>{{ fmtOpStatus(detailRow?.status) }}</dd></div>
-              <div><dt>操作时间</dt><dd>{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
+              <div><dt>客户端 IP</dt><dd class="clickable-text" @click="openDetailFieldZoom('客户端 IP', detailRow?.client_ip)">{{ detailRow?.client_ip || '—' }}</dd></div>
+              <div><dt>操作描述</dt><dd class="clickable-text" @click="openDetailFieldZoom('操作描述', detailRow?.operate_desc)">{{ detailRow?.operate_desc || '—' }}</dd></div>
+              <div><dt>模块</dt><dd class="clickable-text" @click="openDetailFieldZoom('模块', detailRow?.module)">{{ detailRow?.module || '—' }}</dd></div>
+              <div><dt>菜单权限</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('菜单权限', detailRow?.menu_permission, true)">{{ detailRow?.menu_permission || '—' }}</dd></div>
+              <div><dt>操作人</dt><dd class="clickable-text" @click="openDetailFieldZoom('操作人', detailRow?.user_no ? `${detailRow.user_no}${detailRow?.user_id ? ` (ID ${detailRow.user_id})` : ''}` : '—')">{{ detailRow?.user_no || '—' }} <span v-if="detailRow?.user_id" class="muted">(ID {{ detailRow.user_id }})</span></dd></div>
+              <div><dt>操作流水号</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('操作流水号', detailRow?.operate_no, true)">{{ detailRow?.operate_no || '—' }}</dd></div>
+              <div><dt>追踪 ID</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('追踪 ID', detailRow?.trace_id, true)">{{ detailRow?.trace_id || '—' }}</dd></div>
+              <div><dt>请求方法</dt><dd class="clickable-text" @click="openDetailFieldZoom('请求方法', detailRow?.method)">{{ detailRow?.method || '—' }}</dd></div>
+              <div><dt>耗时</dt><dd class="clickable-text" @click="openDetailFieldZoom('耗时', detailRow?.time_consume_ms != null ? `${detailRow.time_consume_ms} ms` : '—')">{{ detailRow?.time_consume_ms ?? '—' }} ms</dd></div>
+              <div><dt>状态</dt><dd class="clickable-text" @click="openDetailFieldZoom('状态', fmtOpStatus(detailRow?.status))">{{ fmtOpStatus(detailRow?.status) }}</dd></div>
+              <div><dt>操作时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('操作时间', fmtDateTime(detailRow?.created_at))">{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
             </dl>
           </section>
           <section class="detail-section">
             <h4>请求 URL</h4>
-            <LogScrollDetail :value="String(detailRow?.url || '')" max-height="80px" />
+            <LogScrollDetail title="请求 URL" :value="String(detailRow?.url || '')" max-height="80px" />
           </section>
           <section class="detail-section">
             <h4>请求内容</h4>
-            <LogScrollDetail :value="String(detailRow?.input_value || '')" />
+            <LogScrollDetail title="请求内容" :value="String(detailRow?.input_value || '')" />
           </section>
           <section class="detail-section">
             <h4>返回内容</h4>
-            <LogScrollDetail :value="String(detailRow?.return_value || '')" />
+            <LogScrollDetail title="返回内容" :value="String(detailRow?.return_value || '')" />
           </section>
         </div>
 
@@ -445,9 +500,9 @@ onMounted(loadList)
             <section v-for="item in sqlItems" :key="item.cmd_seq" class="detail-section">
               <h4>SQL [{{ item.cmd_seq }}]<span v-if="item.cmd_table" class="muted"> · {{ item.cmd_table }}</span></h4>
               <label class="field-label">语句</label>
-              <LogScrollDetail :value="item.cmd_statement" />
+              <LogScrollDetail :title="`SQL [${item.cmd_seq}] 语句`" :value="item.cmd_statement" />
               <label class="field-label">参数</label>
-              <LogScrollDetail :value="item.cmd_parameters" />
+              <LogScrollDetail :title="`SQL [${item.cmd_seq}] 参数`" :value="item.cmd_parameters" />
             </section>
           </template>
           <div v-else class="sql-empty">
@@ -460,26 +515,26 @@ onMounted(loadList)
           <section class="detail-section">
             <h4>基本信息</h4>
             <dl class="detail-dl">
-              <div><dt>模块</dt><dd>{{ detailRow?.module || '—' }}</dd></div>
-              <div><dt>客户端 IP</dt><dd>{{ detailRow?.client_ip || '—' }}</dd></div>
-              <div><dt>异常类型</dt><dd>{{ fmtErrorType(detailRow?.error_type) }}</dd></div>
-              <div><dt>代码定位</dt><dd class="mono">{{ detailRow?.prog_impl || '—' }}</dd></div>
-              <div><dt>操作流水号</dt><dd class="mono">{{ detailRow?.operate_no || '—' }}</dd></div>
-              <div><dt>追踪 ID</dt><dd class="mono">{{ detailRow?.trace_id || '—' }}</dd></div>
-              <div><dt>发生时间</dt><dd>{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
+              <div><dt>模块</dt><dd class="clickable-text" @click="openDetailFieldZoom('模块', detailRow?.module)">{{ detailRow?.module || '—' }}</dd></div>
+              <div><dt>客户端 IP</dt><dd class="clickable-text" @click="openDetailFieldZoom('客户端 IP', detailRow?.client_ip)">{{ detailRow?.client_ip || '—' }}</dd></div>
+              <div><dt>异常类型</dt><dd class="clickable-text" @click="openDetailFieldZoom('异常类型', fmtErrorType(detailRow?.error_type))">{{ fmtErrorType(detailRow?.error_type) }}</dd></div>
+              <div><dt>代码定位</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('代码定位', detailRow?.prog_impl, true)">{{ detailRow?.prog_impl || '—' }}</dd></div>
+              <div><dt>操作流水号</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('操作流水号', detailRow?.operate_no, true)">{{ detailRow?.operate_no || '—' }}</dd></div>
+              <div><dt>追踪 ID</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('追踪 ID', detailRow?.trace_id, true)">{{ detailRow?.trace_id || '—' }}</dd></div>
+              <div><dt>发生时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('发生时间', fmtDateTime(detailRow?.created_at))">{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
             </dl>
           </section>
           <section class="detail-section">
             <h4>请求 URL</h4>
-            <LogScrollDetail :value="String(detailRow?.url || '')" max-height="80px" />
+            <LogScrollDetail title="请求 URL" :value="String(detailRow?.url || '')" max-height="80px" />
           </section>
           <section class="detail-section">
             <h4>异常信息（完整堆栈 / 错误消息 / 响应体）</h4>
-            <LogScrollDetail :value="String(detailRow?.error_message || '')" max-height="360px" />
+            <LogScrollDetail title="异常信息" :value="String(detailRow?.error_message || '')" max-height="360px" />
           </section>
           <section class="detail-section">
             <h4>请求内容（方法 / URL / 头 / 请求体）</h4>
-            <LogScrollDetail :value="requestContentText(detailRow)" max-height="280px" />
+            <LogScrollDetail title="请求内容" :value="requestContentText(detailRow)" max-height="280px" />
           </section>
         </div>
 
@@ -488,31 +543,31 @@ onMounted(loadList)
           <section class="detail-section">
             <h4>基本信息</h4>
             <dl class="detail-dl">
-              <div><dt>API 类型</dt><dd>{{ fmtApiType(detailRow?.api_type) }}</dd></div>
-              <div><dt>请求方法</dt><dd>{{ detailRow?.method || '—' }}</dd></div>
-              <div><dt>状态码</dt><dd>{{ detailRow?.status_code ?? '—' }}</dd></div>
-              <div><dt>结果</dt><dd>{{ fmtSuccess(detailRow?.success) }}</dd></div>
-              <div><dt>耗时</dt><dd>{{ detailRow?.time_consume_ms ?? '—' }} ms</dd></div>
-              <div><dt>用户 ID</dt><dd>{{ detailRow?.user_id ?? '—' }}</dd></div>
-              <div><dt>追踪 ID</dt><dd class="mono">{{ detailRow?.trace_id || '—' }}</dd></div>
-              <div><dt>调用时间</dt><dd>{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
+              <div><dt>API 类型</dt><dd class="clickable-text" @click="openDetailFieldZoom('API 类型', fmtApiType(detailRow?.api_type))">{{ fmtApiType(detailRow?.api_type) }}</dd></div>
+              <div><dt>请求方法</dt><dd class="clickable-text" @click="openDetailFieldZoom('请求方法', detailRow?.method)">{{ detailRow?.method || '—' }}</dd></div>
+              <div><dt>状态码</dt><dd class="clickable-text" @click="openDetailFieldZoom('状态码', detailRow?.status_code)">{{ detailRow?.status_code ?? '—' }}</dd></div>
+              <div><dt>结果</dt><dd class="clickable-text" @click="openDetailFieldZoom('结果', fmtSuccess(detailRow?.success))">{{ fmtSuccess(detailRow?.success) }}</dd></div>
+              <div><dt>耗时</dt><dd class="clickable-text" @click="openDetailFieldZoom('耗时', detailRow?.time_consume_ms != null ? `${detailRow.time_consume_ms} ms` : '—')">{{ detailRow?.time_consume_ms ?? '—' }} ms</dd></div>
+              <div><dt>用户 ID</dt><dd class="clickable-text" @click="openDetailFieldZoom('用户 ID', detailRow?.user_id)">{{ detailRow?.user_id ?? '—' }}</dd></div>
+              <div><dt>追踪 ID</dt><dd class="clickable-text mono" @click="openDetailFieldZoom('追踪 ID', detailRow?.trace_id, true)">{{ detailRow?.trace_id || '—' }}</dd></div>
+              <div><dt>调用时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('调用时间', fmtDateTime(detailRow?.created_at))">{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
             </dl>
           </section>
           <section class="detail-section">
             <h4>目标 URL</h4>
-            <LogScrollDetail :value="String(detailRow?.target_url || '')" max-height="80px" />
+            <LogScrollDetail title="目标 URL" :value="String(detailRow?.target_url || '')" max-height="80px" />
           </section>
           <section class="detail-section">
             <h4>请求摘要</h4>
-            <LogScrollDetail :value="String(detailRow?.request_summary || '')" />
+            <LogScrollDetail title="请求摘要" :value="String(detailRow?.request_summary || '')" />
           </section>
           <section class="detail-section">
             <h4>响应摘要</h4>
-            <LogScrollDetail :value="String(detailRow?.response_summary || '')" />
+            <LogScrollDetail title="响应摘要" :value="String(detailRow?.response_summary || '')" />
           </section>
           <section v-if="detailRow?.error_message" class="detail-section">
             <h4>错误信息</h4>
-            <LogScrollDetail :value="String(detailRow.error_message)" />
+            <LogScrollDetail title="错误信息" :value="String(detailRow.error_message)" />
           </section>
         </div>
 
@@ -521,23 +576,23 @@ onMounted(loadList)
           <section class="detail-section">
             <h4>基本信息</h4>
             <dl class="detail-dl">
-              <div><dt>任务名称</dt><dd>{{ detailRow?.job_name || '—' }}</dd></div>
-              <div><dt>任务组</dt><dd>{{ detailRow?.job_group || '—' }}</dd></div>
-              <div><dt>任务描述</dt><dd>{{ detailRow?.job_desc || '—' }}</dd></div>
-              <div><dt>任务标签</dt><dd>{{ detailRow?.job_tag || '—' }}</dd></div>
-              <div><dt>执行状态</dt><dd>{{ fmtExecuteState(detailRow?.execute_state) }}</dd></div>
-              <div><dt>开始时间</dt><dd>{{ fmtDateTime(detailRow?.start_time) }}</dd></div>
-              <div><dt>结束时间</dt><dd>{{ fmtDateTime(detailRow?.end_time) }}</dd></div>
-              <div><dt>记录时间</dt><dd>{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
+              <div><dt>任务名称</dt><dd class="clickable-text" @click="openDetailFieldZoom('任务名称', detailRow?.job_name)">{{ detailRow?.job_name || '—' }}</dd></div>
+              <div><dt>任务组</dt><dd class="clickable-text" @click="openDetailFieldZoom('任务组', detailRow?.job_group)">{{ detailRow?.job_group || '—' }}</dd></div>
+              <div><dt>任务描述</dt><dd class="clickable-text" @click="openDetailFieldZoom('任务描述', detailRow?.job_desc)">{{ detailRow?.job_desc || '—' }}</dd></div>
+              <div><dt>任务标签</dt><dd class="clickable-text" @click="openDetailFieldZoom('任务标签', detailRow?.job_tag)">{{ detailRow?.job_tag || '—' }}</dd></div>
+              <div><dt>执行状态</dt><dd class="clickable-text" @click="openDetailFieldZoom('执行状态', fmtExecuteState(detailRow?.execute_state))">{{ fmtExecuteState(detailRow?.execute_state) }}</dd></div>
+              <div><dt>开始时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('开始时间', fmtDateTime(detailRow?.start_time))">{{ fmtDateTime(detailRow?.start_time) }}</dd></div>
+              <div><dt>结束时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('结束时间', fmtDateTime(detailRow?.end_time))">{{ fmtDateTime(detailRow?.end_time) }}</dd></div>
+              <div><dt>记录时间</dt><dd class="clickable-text" @click="openDetailFieldZoom('记录时间', fmtDateTime(detailRow?.created_at))">{{ fmtDateTime(detailRow?.created_at) }}</dd></div>
             </dl>
           </section>
           <section class="detail-section">
             <h4>执行信息</h4>
-            <LogScrollDetail :value="String(detailRow?.job_info || '')" />
+            <LogScrollDetail title="执行信息" :value="String(detailRow?.job_info || '')" />
           </section>
           <section v-if="detailRow?.error_msg" class="detail-section">
             <h4>错误信息</h4>
-            <LogScrollDetail :value="String(detailRow.error_msg)" />
+            <LogScrollDetail title="错误信息" :value="String(detailRow.error_msg)" />
           </section>
         </div>
       </div>
@@ -635,6 +690,27 @@ onMounted(loadList)
 .log-table td.wide,
 .log-table th.wide {
   max-width: 220px;
+}
+
+.log-table td.clickable-cell {
+  cursor: zoom-in;
+  transition: background 0.12s;
+}
+
+.log-table td.clickable-cell:hover {
+  background: #f8fafc;
+}
+
+.detail-dl .clickable-text {
+  cursor: zoom-in;
+  border-radius: 6px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  transition: background 0.12s;
+}
+
+.detail-dl .clickable-text:hover {
+  background: #f1f5f9;
 }
 
 .log-table td.mono {
