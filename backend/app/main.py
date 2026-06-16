@@ -15,6 +15,7 @@ from app.routers import (
     admin_rbac,
     admin_sessions,
     admin_system,
+    admin_user_profiles,
     agent_settings,
     auth,
     chat,
@@ -26,6 +27,7 @@ from app.routers import (
     sessions,
     structured_processing,
     system,
+    user_profiles,
 )
 from app.auth.bootstrap import ensure_auth_ready
 from app.middleware.audit_middleware import AuditCasbinMiddleware
@@ -56,6 +58,8 @@ app.include_router(admin_sessions.router, prefix="/api/v1")
 app.include_router(admin_eval.router, prefix="/api/v1")
 app.include_router(admin_rbac.router, prefix="/api/v1")
 app.include_router(admin_system.router, prefix="/api/v1")
+app.include_router(admin_user_profiles.router, prefix="/api/v1")
+app.include_router(user_profiles.router, prefix="/api/v1")
 app.include_router(admin_chat_faq.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
@@ -75,24 +79,25 @@ app.mount("/output", StaticFiles(directory=str(_OUTPUT_DIR)), name="output")
 
 @app.on_event("startup")
 def on_startup() -> None:
-    import threading
     from app.database import engine
     from app.services.sql_trace import register_sql_listeners
 
+    _log = logging.getLogger(__name__)
     register_sql_listeners(engine)
     ensure_auth_ready()
 
-    # 启动时预加载 BGE 嵌入模型(避免首次请求等待8s)
-    def _preload():
-        import logging as _log
-        try:
-            from app.llms import get_embedder
-            _log.getLogger(__name__).info("[启动预加载] BGE嵌入模型加载中...")
-            get_embedder()
-            _log.getLogger(__name__).info("[启动预加载] BGE嵌入模型就绪")
-        except Exception as e:
-            _log.getLogger(__name__).warning("[启动预加载] BGE加载失败: %s", str(e)[:120])
-    threading.Thread(target=_preload, daemon=True).start()
+    # 启动时同步预加载 BGE，避免首条 RAG 请求冷启动超时
+    try:
+        from app.llms import get_embedder
+        _log.info("[启动预加载|main.on_startup|BGE|硬编执行|开始] 嵌入模型加载中")
+        get_embedder()
+        _log.info("[启动预加载|main.on_startup|BGE|硬编执行|完成] 嵌入模型就绪")
+    except Exception as exc:
+        _log.warning(
+            "[启动预加载|main.on_startup|BGE|硬编执行|失败] error_type=%s; error_message=%s",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
 
 if SERVE_FRONTEND_DIR.exists():
     app.mount("/assets", StaticFiles(directory=str(SERVE_FRONTEND_DIR / "assets"), check_dir=False), name="assets")

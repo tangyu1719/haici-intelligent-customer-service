@@ -53,6 +53,8 @@ class Settings(BaseSettings):
 
     CHROMA_HOST: str = os.getenv("CHROMA_HOST", "127.0.0.1")
     CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8001"))
+    # 本地持久化 Chroma（无 Docker / hnswlib 编译环境时使用）
+    CHROMA_PERSIST_PATH: str = os.getenv("CHROMA_PERSIST_PATH", "")
 
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
@@ -67,8 +69,27 @@ class Settings(BaseSettings):
     CHAT_MAX_CONTEXT_CHARS: int = int(os.getenv("CHAT_MAX_CONTEXT_CHARS", str(256 * 1024)))
     CHAT_CONTEXT_RESERVE_CHARS: int = int(os.getenv("CHAT_CONTEXT_RESERVE_CHARS", "32768"))
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
+    # 粗筛大池：单路向量召回上限（如 100），精筛后再自适应落 10/8/5/3
+    RAG_COARSE_POOL_K: int = int(os.getenv("RAG_COARSE_POOL_K", "100"))
+    # 兼容旧名：未设 RAG_COARSE_POOL_K 时 retrieve 单路 fallback
+    RAG_COARSE_TOP_K: int = int(os.getenv("RAG_COARSE_TOP_K", os.getenv("RAG_COARSE_POOL_K", "100")))
+    # 精筛落档梯度：粗筛池大且分数高→高档；池小或分数分散→低档
+    RAG_GRADIENT_K: str = os.getenv("RAG_GRADIENT_K", "10,8,5,3")
     RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.35"))
+    # 精筛「高质量簇」判定：top 与多数片段 hybrid 分均高于此阈值时可顶格落档
+    RAG_HIGH_SCORE_THRESHOLD: float = float(os.getenv("RAG_HIGH_SCORE_THRESHOLD", "0.65"))
+    # 相邻片段分差超过此值视为断层，在精筛阶段截断
+    RAG_SCORE_GAP_THRESHOLD: float = float(os.getenv("RAG_SCORE_GAP_THRESHOLD", "0.12"))
+    # 精筛 BM25 混合权重（0=纯向量，0.3=向量0.7+BM25 0.3）
+    RAG_BM25_WEIGHT: float = float(os.getenv("RAG_BM25_WEIGHT", "0.3"))
+    RAG_HYBRID_ENABLED: bool = os.getenv("RAG_HYBRID_ENABLED", "true").lower() in ("1", "true", "yes")
     CHAT_HISTORY_TURNS: int = int(os.getenv("CHAT_HISTORY_TURNS", "50"))
+    # 上下文摘要：占比达阈值或轮数超滑动窗口时触发
+    CHAT_SUMMARY_THRESHOLD_RATIO: float = float(os.getenv("CHAT_SUMMARY_THRESHOLD_RATIO", "0.8"))
+    CHAT_SLIDING_WINDOW_TURNS: int = int(os.getenv("CHAT_SLIDING_WINDOW_TURNS", "10"))
+    CHAT_AUTO_SUMMARY_ENABLED: bool = os.getenv("CHAT_AUTO_SUMMARY_ENABLED", "true").lower() in ("1", "true", "yes")
+    CHAT_SESSION_MAX_MESSAGES: int = int(os.getenv("CHAT_SESSION_MAX_MESSAGES", "200"))
+    USER_PROFILE_DIR: str = os.getenv("USER_PROFILE_DIR", "./data/user_profiles")
 
     # ── 知识库分块（对齐 web_rebuild slice_method） ──
     KB_DEFAULT_SLICE_METHOD: str = os.getenv("KB_DEFAULT_SLICE_METHOD", "auto")
@@ -98,6 +119,11 @@ class Settings(BaseSettings):
     ANTI_DILUTION_ENABLED: bool = os.getenv("ANTI_DILUTION_ENABLED", "true").lower() in ("1", "true", "yes")
     ANTI_DILUTION_THRESHOLD: int = int(os.getenv("ANTI_DILUTION_THRESHOLD", "8"))
     ANTI_DILUTION_MAX_GROUPS: int = int(os.getenv("ANTI_DILUTION_MAX_GROUPS", "5"))
+
+    # ── ReAct + RAG Tool Calling（复杂多步问答） ──
+    REACT_ENABLED: bool = os.getenv("REACT_ENABLED", "true").lower() in ("1", "true", "yes")
+    REACT_MAX_STEPS: int = int(os.getenv("REACT_MAX_STEPS", "3"))
+    REACT_MAX_RAG_CALLS: int = int(os.getenv("REACT_MAX_RAG_CALLS", "3"))
 
     # 反馈看板：无真实数据时返回标注 demo_mode 的演示统计（默认开启，便于联调 UI）
     FEEDBACK_DEMO_FALLBACK: bool = os.getenv("FEEDBACK_DEMO_FALLBACK", "true").lower() in ("1", "true", "yes")

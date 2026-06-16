@@ -1,12 +1,13 @@
+"""SQLAlchemy ORM 模型。
+
+规约：不在数据库层声明 ForeignKey 约束（对齐阿里/MySQL 线上惯例）；
+关联字段使用 *_id + 索引，引用完整性由 Service/Router 层维护。
+"""
+
 from datetime import date, datetime
 
-
-
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
-
+from sqlalchemy import BigInteger, Date, DateTime, Enum, Index, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
-
-
 
 from app.database import Base
 
@@ -60,8 +61,9 @@ class RbacRole(Base):
 
     status: Mapped[int] = mapped_column(Integer, default=1)
 
+    remark: Mapped[str] = mapped_column(String(255), default="")
 
-
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class RbacUserRole(Base):
@@ -70,9 +72,9 @@ class RbacUserRole(Base):
 
 
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
-    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rbac_role.id", ondelete="CASCADE"), primary_key=True)
+    role_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
 
 
@@ -86,7 +88,7 @@ class RbacRefreshToken(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
 
@@ -160,35 +162,30 @@ class SysMenu(Base):
 
     platform: Mapped[str] = mapped_column(String(32), default="haici")
 
-
-
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class SysRoleMenu(Base):
 
     __tablename__ = "sys_role_menu"
 
+    role_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
-
-    role_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("rbac_role.id", ondelete="CASCADE"), primary_key=True)
-
-    menu_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("sys_menu.id", ondelete="CASCADE"), primary_key=True)
-
-
-
+    menu_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
 
 class ChatSession(Base):
 
     __tablename__ = "chat_sessions"
 
-
-
+    __table_args__ = (
+        Index("idx_sessions_user_deleted", "user_id", "user_deleted"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
     context_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
     title: Mapped[str] = mapped_column(String(200), default="新对话")
 
@@ -216,7 +213,7 @@ class ChatMessage(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    session_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat_sessions.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
     role: Mapped[str] = mapped_column(Enum("user", "assistant", "system", name="message_role"))
 
@@ -236,15 +233,16 @@ class MessageFeedback(Base):
 
     __tablename__ = "message_feedback"
 
-    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uk_feedback_user_message"),)
-
-
-
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uk_feedback_user_message"),
+        Index("idx_feedback_message", "message_id"),
+        Index("idx_feedback_user", "user_id"),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    message_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("chat_messages.id", ondelete="CASCADE"))
+    message_id: Mapped[int] = mapped_column(BigInteger)
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger)
 
     rating: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -266,7 +264,7 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str | None] = mapped_column(String(512))
     is_default: Mapped[int] = mapped_column(Integer, default=0)
@@ -283,9 +281,9 @@ class KnowledgeDocument(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
-    kb_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("knowledge_bases.id", ondelete="SET NULL"), index=True)
+    kb_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
 
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -315,7 +313,7 @@ class DailyQuestionUsage(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(BigInteger)
 
     usage_date: Mapped[date] = mapped_column(Date, nullable=False)
 
@@ -337,6 +335,10 @@ class CasbinRule(Base):
 
 class SysLogOperation(Base):
     __tablename__ = "sys_log_operation"
+    __table_args__ = (
+        Index("idx_op_created", "created_at"),
+        Index("idx_op_trace", "trace_id"),
+    )
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     operate_no: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -358,6 +360,10 @@ class SysLogOperation(Base):
 
 class SysLogError(Base):
     __tablename__ = "sys_log_error"
+    __table_args__ = (
+        Index("idx_err_created", "created_at"),
+        Index("idx_err_trace", "trace_id"),
+    )
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     operate_no: Mapped[str] = mapped_column(String(64), default="")
@@ -374,6 +380,10 @@ class SysLogError(Base):
 
 class SysLogApiCall(Base):
     __tablename__ = "sys_log_api_call"
+    __table_args__ = (
+        Index("idx_api_created", "created_at"),
+        Index("idx_api_trace", "trace_id"),
+    )
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[str] = mapped_column(String(64), default="")
@@ -392,6 +402,7 @@ class SysLogApiCall(Base):
 
 class SysLogSchedule(Base):
     __tablename__ = "sys_log_schedule"
+    __table_args__ = (Index("idx_sched_created", "created_at"),)
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     job_name: Mapped[str] = mapped_column(String(128), default="")
@@ -408,9 +419,13 @@ class SysLogSchedule(Base):
 
 class SysLogOperationSql(Base):
     __tablename__ = "sys_log_operation_sql"
+    __table_args__ = (
+        Index("idx_op_sql_op", "operation_log_id"),
+        Index("idx_op_sql_trace", "trace_id"),
+    )
 
     log_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    operation_log_id: Mapped[int] = mapped_column(BigInteger, index=True, default=0)
+    operation_log_id: Mapped[int] = mapped_column(BigInteger, default=0)
     log_type: Mapped[int] = mapped_column(Integer, default=1)
     cmd_table: Mapped[str] = mapped_column(String(128), default="")
     cmd_statement: Mapped[str | None] = mapped_column(Text)
@@ -431,7 +446,7 @@ class ChatFaq(Base):
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[int] = mapped_column(Integer, default=1, index=True)
-    updated_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
