@@ -22,6 +22,7 @@ MENU_SEED = [
     (20, 0, "M", "个人中心", "", "", None, 3),
     (21, 20, "C", "基本资料", "/profile", "ProfileView", "profile:view", 1),
     (22, 20, "C", "回答反馈记录", "/profile/feedback", "ProfileFeedbackView", "profile:feedback:view", 2),
+    (23, 20, "C", "我的画像", "/profile/memory", "ProfileMemoryView", "profile:memory:edit", 3),
     (100, 0, "M", "日志管理", "", "", None, 98),
     (101, 100, "C", "操作日志", "/admin/logs/operation", "LogOperationView", "system:log:operation", 1),
     (102, 100, "C", "异常日志", "/admin/logs/error", "LogErrorView", "system:log:error", 2),
@@ -33,8 +34,9 @@ MENU_SEED = [
     (113, 110, "C", "会话审计", "/admin/sessions", "ChatSessionAdminView", "system:session:view", 3),
 ]
 
-VIEWER_MENU_IDS = {1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 20, 21, 22}
-ADMIN_MENU_IDS = {m[0] for m in MENU_SEED} | {133, 134}
+VIEWER_MENU_IDS = {1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23}
+# 133/134 由 sync_system_rbac_menu 创建后再绑定，此处不可提前引用
+ADMIN_MENU_IDS = {m[0] for m in MENU_SEED}
 
 
 def ensure_roles(db: Session) -> None:
@@ -153,6 +155,7 @@ def sync_profile_menu_group(db: Session) -> None:
     children = [
         (21, "基本资料", "/profile", "ProfileView", "profile:view", 1),
         (22, "回答反馈记录", "/profile/feedback", "ProfileFeedbackView", "profile:feedback:view", 2),
+        (23, "我的画像", "/profile/memory", "ProfileMemoryView", "profile:memory:edit", 3),
     ]
     for mid, name, path, comp, perm, sort in children:
         row = db.query(SysMenu).filter(SysMenu.id == mid).first()
@@ -163,7 +166,7 @@ def sync_profile_menu_group(db: Session) -> None:
     for role_code in ("viewer", "admin"):
         role = db.query(RbacRole).filter(RbacRole.code == role_code).first()
         if not role: continue
-        for mid in (20, 21, 22):
+        for mid in (20, 21, 22, 23):
             exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == role.id, SysRoleMenu.menu_id == mid).first()
             if not exists: db.add(SysRoleMenu(role_id=role.id, menu_id=mid))
     db.commit()
@@ -285,6 +288,43 @@ def sync_chat_faq_menu(db: Session) -> None:
     admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
     if admin:
         for mid in (130, 132):
+            exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
+            if not exists:
+                db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))
+    db.commit()
+
+
+def sync_user_profile_menu(db: Session) -> None:
+    """系统管理：用户 MD 画像查看。"""
+    parent = db.query(SysMenu).filter(SysMenu.id == 130).first()
+    if not parent:
+        db.add(SysMenu(id=130, parent_id=0, menu_type="M", name="系统管理", path="", component="", permission=None, sort_order=95, platform="haici"))
+    child = db.query(SysMenu).filter(SysMenu.id == 135).first()
+    if not child:
+        db.add(
+            SysMenu(
+                id=135,
+                parent_id=130,
+                menu_type="C",
+                name="用户画像",
+                path="/admin/user-profiles",
+                component="UserProfilesAdminView",
+                permission="system:user_profile:view",
+                sort_order=5,
+                platform="haici",
+            )
+        )
+    else:
+        child.parent_id = 130
+        child.menu_type = "C"
+        child.name = "用户画像"
+        child.path = "/admin/user-profiles"
+        child.component = "UserProfilesAdminView"
+        child.permission = "system:user_profile:view"
+        child.sort_order = 5
+    admin = db.query(RbacRole).filter(RbacRole.code == "admin").first()
+    if admin:
+        for mid in (130, 135):
             exists = db.query(SysRoleMenu).filter(SysRoleMenu.role_id == admin.id, SysRoleMenu.menu_id == mid).first()
             if not exists:
                 db.add(SysRoleMenu(role_id=admin.id, menu_id=mid))

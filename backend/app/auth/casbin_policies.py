@@ -18,6 +18,7 @@ VIEWER_API_POLICIES: list[tuple[str, str, str]] = [
     ("viewer", "/api/v1/knowledge-bases", "GET|POST"),
     ("viewer", "/api/v1/knowledge-bases/*", "GET|POST|PUT|DELETE"),
     ("viewer", "/api/v1/feedback/*", "GET|POST"),
+    ("viewer", "/api/v1/user-profiles/*", "GET|PUT"),
     ("viewer", "/api/v1/system/llm-gateway", "GET"),
     ("viewer", "/api/v1/system/platform/health", "GET"),
 ]

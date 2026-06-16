@@ -18,6 +18,7 @@ from app.auth.seed import (
     sync_log_menu_group,
     sync_system_rbac_menu,
     sync_chat_faq_menu,
+    sync_user_profile_menu,
 )
 from app.auth.casbin_enforcer import seed_casbin_policies
 from app.database import SessionLocal, engine
@@ -54,6 +55,117 @@ _LOG_OPERATION_COLUMN_DDL = [
 _LOG_ERROR_COLUMN_DDL = [
     ("prog_impl", "ADD COLUMN prog_impl VARCHAR(512) NULL DEFAULT '' COMMENT '代码定位' AFTER error_message"),
 ]
+
+_RBAC_ROLE_COLUMN_DDL = [
+    ("remark", "ADD COLUMN remark VARCHAR(255) NOT NULL DEFAULT '' COMMENT '备注' AFTER status"),
+    ("created_at", "ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER remark"),
+]
+
+_SYS_MENU_COLUMN_DDL = [
+    ("created_at", "ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER platform"),
+]
+
+_KD_COLUMN_DDL = [
+    ("kb_id", "ADD COLUMN kb_id BIGINT NULL COMMENT '所属知识库' AFTER user_id"),
+]
+
+_NORMALIZE_INDEXES = [
+    ("rbac_user_role", "idx_ur_user", "CREATE INDEX idx_ur_user ON rbac_user_role (user_id)"),
+    ("rbac_user_role", "idx_ur_role", "CREATE INDEX idx_ur_role ON rbac_user_role (role_id)"),
+    ("sys_role_menu", "idx_rm_role", "CREATE INDEX idx_rm_role ON sys_role_menu (role_id)"),
+    ("sys_role_menu", "idx_rm_menu", "CREATE INDEX idx_rm_menu ON sys_role_menu (menu_id)"),
+    ("chat_sessions", "idx_sessions_user_deleted", "CREATE INDEX idx_sessions_user_deleted ON chat_sessions (user_id, user_deleted)"),
+    ("message_feedback", "idx_feedback_message", "CREATE INDEX idx_feedback_message ON message_feedback (message_id)"),
+    ("message_feedback", "idx_feedback_user", "CREATE INDEX idx_feedback_user ON message_feedback (user_id)"),
+    ("chat_faq", "idx_chat_faq_updated_by", "CREATE INDEX idx_chat_faq_updated_by ON chat_faq (updated_by)"),
+    ("daily_question_usage", "idx_usage_user", "CREATE INDEX idx_usage_user ON daily_question_usage (user_id)"),
+    ("sys_log_operation", "idx_op_trace", "CREATE INDEX idx_op_trace ON sys_log_operation (trace_id)"),
+    ("sys_log_error", "idx_err_trace", "CREATE INDEX idx_err_trace ON sys_log_error (trace_id)"),
+    ("sys_log_api_call", "idx_api_trace", "CREATE INDEX idx_api_trace ON sys_log_api_call (trace_id)"),
+]
+
+# 历史脚本曾建数据库外键，按阿里规约启动时幂等移除
+_LEGACY_DB_FOREIGN_KEYS: list[tuple[str, str]] = [
+    ("rbac_user_role", "fk_ur_user"),
+    ("rbac_user_role", "fk_ur_role"),
+    ("rbac_refresh_token", "fk_refresh_user"),
+    ("sys_role_menu", "fk_rm_role"),
+    ("sys_role_menu", "fk_rm_menu"),
+    ("chat_sessions", "fk_sessions_user"),
+    ("chat_messages", "fk_messages_session"),
+    ("message_feedback", "fk_feedback_message"),
+    ("message_feedback", "fk_feedback_user"),
+    ("chat_faq", "fk_chat_faq_updated_by"),
+    ("knowledge_bases", "fk_kb_bases_user"),
+    ("knowledge_bases", "fk_kb_user"),
+    ("knowledge_documents", "fk_kd_user"),
+    ("knowledge_documents", "fk_kd_kb"),
+    ("knowledge_documents", "fk_kb_user"),
+    ("daily_question_usage", "fk_usage_user"),
+]
+
+
+def _ensure_table_columns(conn, table: str, ddl_list: list[tuple[str, str]], log_prefix: str) -> None:
+    try:
+        rows = conn.execute(text(f"SHOW COLUMNS FROM {table}")).fetchall()
+    except Exception:
+        return
+    existing = {r[0] for r in rows}
+    for col, ddl in ddl_list:
+        if col in existing:
+            continue
+        try:
+            conn.execute(text(f"ALTER TABLE {table} {ddl}"))
+        except Exception as exc:
+            logger.warning("[%s|bootstrap|%s.%s|硬编执行|跳过] err=%s", log_prefix, table, col, str(exc)[:120])
+
+
+def _ensure_rbac_role_columns(conn) -> None:
+    _ensure_table_columns(conn, "rbac_role", _RBAC_ROLE_COLUMN_DDL, "RBAC-迁移")
+
+
+def _ensure_sys_menu_columns(conn) -> None:
+    _ensure_table_columns(conn, "sys_menu", _SYS_MENU_COLUMN_DDL, "RBAC-迁移")
+
+
+def _ensure_knowledge_documents_columns(conn) -> None:
+    _ensure_table_columns(conn, "knowledge_documents", _KD_COLUMN_DDL, "知识库-迁移")
+    try:
+        conn.execute(text("CREATE INDEX idx_kd_kb ON knowledge_documents (kb_id)"))
+    except Exception as exc:
+        msg = str(exc)
+        if "Duplicate" not in msg and "1061" not in msg:
+            logger.warning("[知识库-迁移|bootstrap|idx_kd_kb|硬编执行|跳过] err=%s", msg[:120])
+
+
+def _drop_legacy_db_foreign_keys(conn) -> None:
+    """移除历史数据库外键（阿里规约：不在 DB 层建 FK，引用完整性由应用层维护）。"""
+    for table, fk_name in _LEGACY_DB_FOREIGN_KEYS:
+        try:
+            conn.execute(text(f"ALTER TABLE `{table}` DROP FOREIGN KEY `{fk_name}`"))
+            logger.info("[结构规范化|bootstrap|drop_fk|硬编执行|完成] table=%s; fk=%s", table, fk_name)
+        except Exception as exc:
+            msg = str(exc)
+            if "1091" in msg or "check that column/key exists" in msg.lower():
+                continue
+            logger.warning("[结构规范化|bootstrap|drop_fk|硬编执行|跳过] table=%s; fk=%s; err=%s", table, fk_name, msg[:120])
+
+
+def _ensure_normalize_indexes(conn) -> None:
+    for table, idx_name, ddl in _NORMALIZE_INDEXES:
+        try:
+            rows = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM information_schema.statistics "
+                    "WHERE table_schema = DATABASE() AND table_name = :t AND index_name = :i"
+                ),
+                {"t": table, "i": idx_name},
+            ).scalar()
+            if rows and int(rows) > 0:
+                continue
+            conn.execute(text(ddl))
+        except Exception as exc:
+            logger.warning("[结构规范化|bootstrap|%s|硬编执行|跳过] err=%s", idx_name, str(exc)[:120])
 
 
 def _ensure_users_columns(conn) -> None:
@@ -196,9 +308,14 @@ def _run_sql_migration() -> None:
         _ensure_users_columns(conn)
         _ensure_chat_sessions_columns(conn)
         _ensure_message_feedback_columns(conn)
+        _ensure_rbac_role_columns(conn)
+        _ensure_sys_menu_columns(conn)
+        _ensure_knowledge_documents_columns(conn)
+        _drop_legacy_db_foreign_keys(conn)
         _ensure_log_sql_schema(conn)
         _ensure_sys_log_operation_columns(conn)
         _ensure_sys_log_error_columns(conn)
+        _ensure_normalize_indexes(conn)
         for stmt in stmts:
             upper = stmt.upper()
             if upper.startswith("USE ") or "ALTER TABLE USERS" in upper:
@@ -226,6 +343,7 @@ def ensure_auth_ready() -> None:
         sync_agent_settings_menu(db)
         sync_system_rbac_menu(db)
         sync_chat_faq_menu(db)
+        sync_user_profile_menu(db)
         backfill_user_no(db)
         from app.services.chat_faq import seed_default_chat_faq
 
