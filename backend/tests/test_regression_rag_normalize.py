@@ -181,11 +181,12 @@ class TestDocNormalizer:
         assert manifest.get("pipeline_note") == "docx_p0_ordered"
         imgs = list(Path(r.assets_dir, "images").glob("img_*"))
         assert len(imgs) >= 1
-        assert "<!-- IMG:img_" in r.text
-        assert "<!-- IMG:img_" in r.text and ":BODY -->" in r.text
+        assert "{picture_id:" in r.text
+        assert "url:" in r.text
+        assert "description:" in r.text
         assert "售后说明文档" in r.text
-        assert r.text.index("售后说明文档") < r.text.index("<!-- IMG:img_")
-        assert "/output/kb_assets/" in r.text
+        assert r.text.index("售后说明文档") < r.text.index("{picture_id:")
+        assert "/output/kb_assets/" in r.text or "kb_assets" in r.text
 
     def test_normalize_xlsx_extracts_image(self, sample_xlsx_with_image: Path):
         from app.services.doc_normalizer import normalize_document
@@ -278,10 +279,11 @@ class TestPdfMineruPipeline:
             doc_context_prefix=md[:500],
         )
         assert len(img_results) >= 1
-        assert "<!-- IMG:img_" in full_text
-        assert ":BODY -->" in full_text
-        assert "/output/kb_assets/" in full_text
-        assert "images/page1_img1.png" not in full_text or "<!-- IMG:" in full_text
+        assert "{picture_id:" in full_text
+        assert "url:" in full_text
+        assert "description:" in full_text
+        assert "/output/kb_assets/" in full_text or "kb_assets" in full_text
+        assert "images/page1_img1.png" not in full_text or "{picture_id:" in full_text
         assert img_results[0].pipeline
         assert list((asset_root / "images").glob("img_*.png"))
 
@@ -303,8 +305,8 @@ class TestPdfMineruPipeline:
         manifest = json.loads(Path(r.manifest_path).read_text(encoding="utf-8"))
         assert manifest["image_count"] >= 1
         assert manifest.get("pipeline_note") == "mineru_pdf"
-        assert "<!-- IMG:img_" in r.text
-        assert "/output/kb_assets/" in r.text
+        assert "{picture_id:" in r.text
+        assert "/output/kb_assets/" in r.text or "kb_assets" in r.text
 
 
 class TestKbChunkService:

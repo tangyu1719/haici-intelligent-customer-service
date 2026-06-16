@@ -274,11 +274,15 @@ def delete_doc(document_id: int, db: Session = Depends(get_db), current_user: Us
     doc = db.get(KnowledgeDocument, document_id)
     if not doc or doc.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="文档不存在")
+    # processing / failed / ready 均允许删除；向量清理失败不阻断 DB 记录删除
     delete_by_document(document_id, tenant_id=str(current_user.id))
-    Path(doc.storage_path).unlink(missing_ok=True)
+    try:
+        Path(doc.storage_path).unlink(missing_ok=True)
+    except OSError:
+        pass
     asset_root = kb_assets_dir(current_user.id, document_id)
     if asset_root.is_dir():
         shutil.rmtree(asset_root, ignore_errors=True)
     db.delete(doc)
     db.commit()
-    return {"ok": True}
+    return {"ok": True, "id": document_id}

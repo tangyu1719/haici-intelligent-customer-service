@@ -109,7 +109,9 @@ def ingest_uploaded_document(
     from app.services.doc_inspector import inspect_document
     from app.services.doc_normalizer import normalize_document
     from app.services.multimodal_task_manager import (
+        TaskCancelledError,
         complete_stage,
+        ensure_not_cancelled,
         fail_stage,
         get_task,
         start_stage,
@@ -118,10 +120,12 @@ def ingest_uploaded_document(
 
     def _step(stage_id: str) -> None:
         if task_id:
+            ensure_not_cancelled(task_id)
             start_stage(task_id, stage_id)
 
     def _done(stage_id: str, result: object = None) -> None:
         if task_id:
+            ensure_not_cancelled(task_id)
             complete_stage(task_id, stage_id, result)
 
     try:
@@ -182,6 +186,8 @@ def ingest_uploaded_document(
             "normalized_md": str(norm_md) if norm_md else "",
             "text_length": len(text),
         }
+    except TaskCancelledError:
+        raise
     except Exception as e:
         if task_id:
             t = get_task(task_id) or {}

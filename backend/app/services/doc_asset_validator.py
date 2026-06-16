@@ -11,7 +11,7 @@ from app.services.docx_ordered_parser import extract_all_docx_media, parse_docx_
 
 logger = logging.getLogger(__name__)
 
-PICTURE_BLOCK_RE = re.compile(r"\{picture_id\s*:", re.MULTILINE)
+PICTURE_BLOCK_RE = re.compile(r"^\{picture_id\s*:", re.MULTILINE)
 
 
 def count_docx_inline_images(source: Path) -> int:
@@ -22,7 +22,18 @@ def count_docx_inline_images(source: Path) -> int:
 
 
 def count_picture_blocks_in_md(text: str) -> int:
-    return len(PICTURE_BLOCK_RE.findall(text or ""))
+    """统计行首 picture 块数量（按 img_id 去重，忽略 description 内嵌引用）。"""
+    ids: set[str] = set()
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{picture_id"):
+            continue
+        m = re.search(r"(img_\d+)", stripped)
+        if m:
+            ids.add(m.group(1))
+        else:
+            ids.add(stripped[:120])
+    return len(ids)
 
 
 def validate_normalization_assets(
@@ -31,8 +42,12 @@ def validate_normalization_assets(
     img_results: List[ImageProcessResult],
     *,
     source: Optional[Path] = None,
+    truncated: bool = False,
 ) -> Dict[str, Any]:
-    """硬编校验：磁盘文件、manifest 条目、MD picture 块、img_results 四者必须一致。"""
+    """硬编校验：磁盘文件、manifest 条目、MD picture 块、img_results 四者必须一致。
+
+    truncated=True 时允许 MD 内 picture 块数大于实际处理数（VLM 上限截断）。
+    """
     images_dir = asset_root / "images"
     disk_files = sorted(
         p for p in images_dir.iterdir()
@@ -59,7 +74,12 @@ def validate_normalization_assets(
         errors.append(
             f"磁盘图片数({disk_count}) != 处理结果数({processed})"
         )
-    if md_blocks != processed:
+    if truncated:
+        if md_blocks < processed:
+            errors.append(
+                f"MD picture 块数({md_blocks}) < 处理结果数({processed})"
+            )
+    elif md_blocks != processed:
         errors.append(
             f"MD picture 块数({md_blocks}) != 处理结果数({processed})"
         )
@@ -85,7 +105,7 @@ def validate_normalization_assets(
         counts["docx_media_total"] = len(media)
         counts["docx_inline_refs"] = inline
         counts["docx_orphan_media"] = max(0, len(media) - inline)
-        if processed < inline:
+        if not truncated and processed < inline:
             errors.append(
                 f"处理数({processed}) < DOCX 正文内联图数({inline})"
             )

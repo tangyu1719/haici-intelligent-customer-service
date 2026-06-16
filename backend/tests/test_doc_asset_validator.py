@@ -53,6 +53,39 @@ def test_validate_normalization_assets_ok(tmp_path: Path):
     assert report["counts"]["md_picture_blocks"] == count_picture_blocks_in_md(block)
 
 
+def test_count_picture_blocks_ignores_nested_in_description():
+    nested = (
+        "{picture_id:图1-img_0001;\n"
+        "url:/x;\n"
+        "description:\n"
+        "参见 {picture_id:图2-img_0002; url:/y; description: 内嵌}\n"
+        "}"
+    )
+    assert count_picture_blocks_in_md(nested) == 1
+
+
+def test_validate_normalization_assets_truncated_allows_extra_md_blocks(tmp_path: Path):
+    asset_root = tmp_path / "assets"
+    images = asset_root / "images"
+    images.mkdir(parents=True)
+    p = images / "img_0001.png"
+    p.write_bytes(b"x")
+    res = ImageProcessResult(
+        image_id="img_0001",
+        file_name="img_0001.png",
+        abs_path=str(p),
+        public_url="/output/x",
+        vlm_description="描述",
+    )
+    block = build_rag_image_block(res, ordinal=1)
+    extra = "{picture_id:图2-img_0002;url:/x;description:未处理占位}"
+    md = block + "\n" + extra
+    report = validate_normalization_assets(asset_root, md, [res], truncated=True)
+    assert report["ok"] is True
+    report_strict = validate_normalization_assets(asset_root, md, [res], truncated=False)
+    assert report_strict["ok"] is False
+
+
 def test_validate_normalization_assets_mismatch(tmp_path: Path):
     asset_root = tmp_path / "assets"
     (asset_root / "images").mkdir(parents=True)

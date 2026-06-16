@@ -28,6 +28,7 @@ from app.services.md_image_resolver import (
     materialize_all_refs,
 )
 from app.services.haici_output import kb_assets_dir
+from app.services.multimodal_task_manager import TaskCancelledError
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def _finalize(
         "images": [r.to_manifest_entry(i + 1, source.suffix.lstrip(".")) for i, r in enumerate(img_results)],
     }
     validation = validate_normalization_assets(
-        asset_root, full_text, img_results, source=source
+        asset_root, full_text, img_results, source=source, truncated=truncated
     )
     manifest["validation"] = validation
     inspect["processed_image_count"] = len(img_results)
@@ -143,6 +144,8 @@ def _extract_office_images(source: Path, images_dir: Path) -> List[Path]:
                 dest = images_dir / f"img_{idx:04d}{ext}"
                 dest.write_bytes(zf.read(name))
                 out.append(dest)
+    except TaskCancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "[RAG-文档标准化|doc_normalizer|extract_office|硬编执行|失败] err=%s",
@@ -172,6 +175,8 @@ def _extract_pdf_images(source: Path, images_dir: Path, limit: int) -> List[Path
             if idx >= limit:
                 break
         doc.close()
+    except TaskCancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "[RAG-文档标准化|doc_normalizer|extract_pdf|硬编执行|失败] err=%s",
@@ -200,7 +205,12 @@ def _resolve_mineru_output_dir(asset_root: Path, stem: str) -> Path:
 
 
 def _mineru_to_text(source: Path, asset_root: Path) -> tuple[str, Path]:
-    """MinerU 解析：返回 Markdown + 产出目录（切图与 ![](...) 已由 MinerU 完成）。"""
+    """MinerU 解析：切图 + Markdown（内置 VLM 关闭，OCR/VLM 由 doc_image_pipeline 统一处理）。"""
+    try:
+        import loguru  # noqa: F401 — MinerU 3.x 硬依赖
+    except ImportError as exc:
+        raise RuntimeError("MinerU 依赖 loguru 未安装，请 pip install loguru") from exc
+
     from app.services.document import process_with_mineru
 
     out_dir = str(asset_root / "_mineru_tmp")
@@ -242,25 +252,58 @@ def _process_images_batch(
     *,
     source_format: str = "unknown",
     task_id: str = "",
+    sequential_context: bool = False,
 ) -> List[ImageProcessResult]:
-    """Process multiple images in batch using process_image."""
+    """批量 OCR/VLM；与 DOCX/PDF 共用，输出 picture 块 + manifest 条目。"""
+    from app.services.multimodal_task_manager import (
+        TaskCancelledError,
+        add_log,
+        ensure_not_cancelled,
+        start_stage,
+    )
+
     results: List[ImageProcessResult] = []
-    for dest, img_id, doc_context in jobs:
+    total = len(jobs)
+    if task_id and total > 0:
+        fmt = (source_format or "文档").lower()
+        if fmt == "pdf":
+            add_log(task_id, f"MinerU PDF 切图完成，约 {total} 张，开始 OCR/VLM 识别与描述…")
+        else:
+            add_log(task_id, f"{fmt.upper()} 内嵌图片约 {total} 张，开始 OCR/VLM 识别与描述…")
+        start_stage(task_id, "extract_images")
+        start_stage(task_id, "ocr")
+
+    rolling_ctx = jobs[0][2] if jobs else ""
+
+    for idx, (dest, img_id, doc_context) in enumerate(jobs, start=1):
+        ensure_not_cancelled(task_id)
+        if task_id:
+            add_log(task_id, f"图片 {idx}/{total}: OCR/VLM 识别与描述中…")
+            if idx == 1:
+                start_stage(task_id, "vlm_describe")
+        ctx = rolling_ctx[-2000:] if sequential_context else doc_context[-2000:]
         try:
             res = process_image(
                 str(dest),
                 image_id=img_id,
-                doc_context=doc_context,
+                doc_context=ctx,
                 source_format=source_format,
             )
             results.append(res)
+            if sequential_context:
+                rolling_ctx = f"{rolling_ctx}\n{res.vlm_description or res.ocr_text or ''}"
+            if task_id:
+                desc = (res.vlm_description or res.ocr_text or "").strip()
+                preview = desc[:80] + ("…" if len(desc) > 80 else "")
+                add_log(task_id, f"图片 {idx}/{total} 完成: {preview or '(无描述)'}")
+        except TaskCancelledError:
+            raise
         except Exception as exc:
             logger.warning(
-                "[RAG-?????|doc_normalizer|_process_images_batch|????|????] img_id=%s; err=%s",
+                "[RAG-文档标准化|doc_normalizer|_process_images_batch|硬编执行|单图失败] img_id=%s; err=%s",
                 img_id,
                 str(exc)[:200],
             )
-            # Create a minimal result for failed images
             results.append(
                 ImageProcessResult(
                     image_id=img_id,
@@ -274,6 +317,8 @@ def _process_images_batch(
                     error=str(exc)[:200],
                 )
             )
+    if task_id and total > 0:
+        start_stage(task_id, "assemble_md")
     return results
 
 
@@ -579,7 +624,12 @@ def _normalize_docx(
             limit=limit,
             inspect=inspect,
             pipeline_note="mineru_docx_fallback",
+            source_format="docx",
+            task_id=task_id,
+            document_title=document_title,
         )
+    except TaskCancelledError:
+        raise
     except Exception as exc:
         logger.warning(
             "[RAG-文档标准化|doc_normalizer|docx|硬编执行|P2降级] err=%s",
@@ -611,6 +661,28 @@ def _normalize_docx(
         )
 
 
+def _try_recover_mineru_output(source: Path, asset_root: Path) -> tuple[str, Path] | None:
+    """MinerU 主流程异常时，尝试读取已落盘的 md/images 继续 OCR/VLM 链路。"""
+    base_dir = _resolve_mineru_output_dir(asset_root, source.stem)
+    images_dir = base_dir / "images"
+    md = ""
+    direct = base_dir / f"{source.stem}.md"
+    if direct.is_file():
+        md = direct.read_text(encoding="utf-8", errors="ignore")
+    if not md.strip():
+        for p in sorted(base_dir.rglob("*.md")) if base_dir.is_dir() else []:
+            try:
+                md = p.read_text(encoding="utf-8", errors="ignore")
+                if md.strip():
+                    base_dir = p.parent
+                    break
+            except OSError:
+                continue
+    if md.strip() or (images_dir.is_dir() and any(images_dir.iterdir())):
+        return md, base_dir
+    return None
+
+
 def _describe_mineru_markdown(
     md: str,
     asset_root: Path,
@@ -619,53 +691,58 @@ def _describe_mineru_markdown(
     source_format: str,
     limit: int,
     doc_context_prefix: str = "",
+    task_id: str = "",
 ) -> Tuple[str, List[ImageProcessResult], bool]:
-    """MinerU 已产出 md 内图片链接与本地切图；此处仅 OCR/VLM 识别、描述与 SPEC 回插。"""
+    """MinerU 已切图并写入 md 内 ![](...) 引用；本函数走与 DOCX 相同的 OCR/VLM → picture 块 → manifest。"""
     refs = iter_image_refs(md)
     truncated = len(refs) > limit
     img_results: List[ImageProcessResult] = []
-
-    if not refs:
-        return md, [], False
-
     images_dir = asset_root / "images"
-    materialized = materialize_all_refs(
-        refs,
-        images_dir,
-        base_dir=mineru_base_dir,
-        limit=limit,
-    )
+    images_dir.mkdir(parents=True, exist_ok=True)
+    ctx_prefix = (doc_context_prefix or md)[:2000]
+
     url_map: Dict[str, ImageProcessResult] = {}
-    ctx = (doc_context_prefix or md)[:2000]
-    referenced_names: set[str] = set()
-
-    for i, (orig_url, _alt, local_path) in enumerate(materialized, start=1):
-        img_id = f"img_{i:04d}"
-        referenced_names.add(local_path.name)
-        res = process_image(
-            str(local_path),
-            image_id=img_id,
-            doc_context=ctx[-2000:],
-            source_format=source_format,
+    if refs:
+        materialized = materialize_all_refs(
+            refs,
+            images_dir,
+            base_dir=mineru_base_dir,
+            limit=limit,
         )
-        img_results.append(res)
-        url_map[orig_url] = res
-        ctx = f"{ctx}\n{res.vlm_description or res.ocr_text or ''}"
+        jobs: List[Tuple[Path, str, str]] = []
+        ref_urls: List[str] = []
+        for i, (orig_url, _alt, local_path) in enumerate(materialized, start=1):
+            img_id = f"img_{i:04d}"
+            jobs.append((local_path, img_id, ctx_prefix))
+            ref_urls.append(orig_url)
+        batch_results = _process_images_batch(
+            jobs,
+            source_format=source_format,
+            task_id=task_id,
+            sequential_context=True,
+        )
+        for orig_url, res in zip(ref_urls, batch_results):
+            img_results.append(res)
+            url_map[orig_url] = res
 
-    def _replace_img_ref(m: re.Match[str]) -> str:
-        url = (m.group(2) or "").strip()
-        res = url_map.get(url)
-        if not res:
-            return m.group(0)
-        return res.rag_block
+        def _replace_img_ref(m: re.Match[str]) -> str:
+            url = (m.group(2) or "").strip()
+            res = url_map.get(url)
+            if not res or not res.rag_block:
+                return m.group(0)
+            return res.rag_block
 
-    full_text = IMG_MD_RE.sub(_replace_img_ref, md).strip()
+        full_text = IMG_MD_RE.sub(_replace_img_ref, md).strip()
+    else:
+        full_text = md.strip()
 
-    # MinerU 切图目录中未被 md 引用的 orphan 图（少见）追加到文末
+    referenced_names: set[str] = {r.file_name for r in img_results if r.file_name}
     orphan_parts: List[str] = []
     mineru_img_dir = mineru_base_dir / "images"
     if mineru_img_dir.is_dir():
+        orphan_jobs: List[Tuple[Path, str, str]] = []
         start_no = len(img_results)
+        rolling = ctx_prefix
         for f in sorted(mineru_img_dir.iterdir()):
             if f.suffix.lower() not in IMAGE_EXTS or f.name in referenced_names:
                 continue
@@ -677,15 +754,19 @@ def _describe_mineru_markdown(
             dest = images_dir / f"{img_id}{f.suffix.lower()}"
             if f.resolve() != dest.resolve():
                 shutil.copy2(f, dest)
-            res = process_image(
-                str(dest),
-                image_id=img_id,
-                doc_context=ctx[-2000:],
+            orphan_jobs.append((dest, img_id, rolling))
+        if orphan_jobs:
+            orphan_results = _process_images_batch(
+                orphan_jobs,
                 source_format=source_format,
+                task_id=task_id,
+                sequential_context=True,
             )
-            img_results.append(res)
-            orphan_parts.append(res.rag_block)
-            ctx = f"{ctx}\n{res.vlm_description or res.ocr_text or ''}"
+            for res in orphan_results:
+                img_results.append(res)
+                if res.rag_block:
+                    orphan_parts.append(res.rag_block)
+
     if orphan_parts:
         full_text = f"{full_text}\n\n## 文档插图与识别结果\n\n" + "\n\n".join(orphan_parts)
 
@@ -702,14 +783,22 @@ def _normalize_mineru_markdown(
     inspect: Dict[str, Any],
     pipeline_note: str,
     source_format: str = "pdf",
+    task_id: str = "",
+    document_title: str = "",
 ) -> NormalizationResult:
+    """MinerU 切图 + 与 DOCX 一致的 OCR/VLM/picture/manifest 收尾。"""
+    title = document_title or source.stem
+    body = md.strip()
+    if body and not body.lstrip().startswith("#"):
+        body = f"# {title}\n\n{body}"
     full_text, img_results, truncated = _describe_mineru_markdown(
-        md,
+        body,
         asset_root,
         mineru_base_dir,
         source_format=source_format,
         limit=limit,
-        doc_context_prefix=md[:2000],
+        doc_context_prefix=body[:2000],
+        task_id=task_id,
     )
     if not full_text.strip():
         raise RuntimeError("MinerU 未产出正文")
@@ -722,6 +811,7 @@ def _normalize_mineru_markdown(
         img_results=img_results,
         truncated=truncated,
         limit=limit,
+        document_title=title,
     )
 
 
@@ -734,7 +824,9 @@ def _normalize_pdf(
     document_title: str = "",
     task_id: str = "",
 ) -> NormalizationResult:
+    """PDF：MinerU 切图 → OCR/VLM → picture 块 → manifest（与 DOCX 下游一致）。"""
     title = document_title or source.stem
+    mineru_err = ""
     try:
         md, mineru_dir = _mineru_to_text(source, asset_root)
         return _normalize_mineru_markdown(
@@ -746,42 +838,73 @@ def _normalize_pdf(
             inspect=inspect,
             pipeline_note="mineru_pdf",
             source_format="pdf",
-        )
-    except Exception as exc:
-        logger.warning(
-            "[RAG-文档标准化|doc_normalizer|pdf|硬编执行|MinerU失败] err=%s",
-            str(exc)[:200],
-        )
-        import fitz
-
-        doc = fitz.open(source)
-        doc_context = "\n".join(page.get_text() for page in doc)
-        doc.close()
-        body_parts = [f"# {title}\n\n{doc_context}"]
-        image_paths = _extract_pdf_images(source, asset_root / "images", limit)
-        md_parts, img_results, truncated = _process_images_inline(
-            image_paths,
-            asset_root=asset_root,
-            source_format="pdf",
-            doc_context=doc_context,
-            limit=limit,
             task_id=task_id,
-        )
-        if md_parts:
-            body_parts.append("\n## 文档插图与识别结果\n")
-            body_parts.extend(md_parts)
-        full_text = "\n\n".join(body_parts).strip()
-        return _finalize(
-            asset_root,
-            full_text,
-            inspect,
-            source=source,
-            pipeline_note="pymupdf_ocr_fallback",
-            img_results=img_results,
-            truncated=truncated,
-            limit=limit,
             document_title=title,
         )
+    except TaskCancelledError:
+        raise
+    except Exception as exc:
+        mineru_err = str(exc)[:200]
+        logger.warning(
+            "[RAG-文档标准化|doc_normalizer|pdf|硬编执行|MinerU失败] err=%s",
+            mineru_err,
+        )
+
+    recovered = _try_recover_mineru_output(source, asset_root)
+    if recovered:
+        md, mineru_dir = recovered
+        logger.info(
+            "[RAG-文档标准化|doc_normalizer|pdf|硬编执行|MinerU部分恢复] source=%s; md_len=%s",
+            source.name,
+            len(md),
+        )
+        return _normalize_mineru_markdown(
+            source,
+            asset_root,
+            md,
+            mineru_dir,
+            limit=limit,
+            inspect=inspect,
+            pipeline_note="mineru_pdf_partial",
+            source_format="pdf",
+            task_id=task_id,
+            document_title=title,
+        )
+
+    # 最终兜底：PyMuPDF 抽正文+内嵌图，下游仍走 _process_images_batch（OCR/VLM 与 DOCX 相同）
+    import fitz
+
+    doc = fitz.open(source)
+    doc_context = "\n".join(page.get_text() for page in doc)
+    doc.close()
+    body_parts = [f"# {title}\n\n{doc_context}"]
+    image_paths = _extract_pdf_images(source, asset_root / "images", limit)
+    md_parts, img_results, truncated = _process_images_inline(
+        image_paths,
+        asset_root=asset_root,
+        source_format="pdf",
+        doc_context=doc_context,
+        limit=limit,
+        task_id=task_id,
+    )
+    if md_parts:
+        body_parts.append("\n## 文档插图与识别结果\n")
+        body_parts.extend(md_parts)
+    full_text = "\n\n".join(body_parts).strip()
+    inspect = dict(inspect)
+    inspect["mineru_error"] = mineru_err
+    inspect["degraded"] = True
+    return _finalize(
+        asset_root,
+        full_text,
+        inspect,
+        source=source,
+        pipeline_note="pymupdf_ocr_fallback",
+        img_results=img_results,
+        truncated=truncated,
+        limit=limit,
+        document_title=title,
+    )
 
 
 def _normalize_office_other(
@@ -807,7 +930,11 @@ def _normalize_office_other(
                 inspect=inspect,
                 pipeline_note="mineru_office_fallback",
                 source_format=source.suffix.lstrip(".") or "office",
+                task_id=task_id,
+                document_title=title,
             )
+        except TaskCancelledError:
+            raise
         except Exception as exc:
             logger.warning(
                 "[RAG-文档标准化|doc_normalizer|office|硬编执行|失败] err=%s",
@@ -860,6 +987,9 @@ def normalize_document(
     document_name: str | None = None,
     task_id: str = "",
 ) -> NormalizationResult:
+    from app.services.multimodal_task_manager import ensure_not_cancelled
+
+    ensure_not_cancelled(task_id)
     source = source.resolve()
     doc_title = _resolve_document_title(source, document_name)
     inspect = inspect_document(source)
@@ -976,6 +1106,8 @@ def normalize_document(
             inspect=inspect,
             manifest=manifest,
         )
+    except TaskCancelledError:
+        raise
     except Exception as exc:
         logger.exception(
             "[RAG-文档标准化|doc_normalizer|normalize_document|硬编执行|失败] doc_id=%s",
