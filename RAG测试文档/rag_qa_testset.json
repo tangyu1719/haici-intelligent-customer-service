@@ -1,0 +1,232 @@
+{
+  "meta": {
+    "version": "1.0",
+    "created": "2026-06-16",
+    "docs": [
+      "运维助手用户手册-V1.0.docx",
+      "_云盒培训文档_converted.docx",
+      "WMS系统高频报错代码及解决方案手册（简体中文）（V1.0）.docx"
+    ],
+    "note": "口语化、非业务术语对齐、模拟未知产品视角"
+  },
+  "warmup_pool": [
+    "在吗？",
+    "你好呀",
+    "今天天气不错",
+    "我先随便聊两句",
+    "忙不忙？",
+    "你能帮我看个问题吗"
+  ],
+  "cases": [
+    {
+      "id": "T01",
+      "source_hint": "运维助手",
+      "warmup": "你好，我刚接手这块",
+      "question": "仓库那边老是说要查操作记录，有没有个地方能集中翻日志啊？",
+      "followup": "那能按菜单或者操作类型筛吗？"
+    },
+    {
+      "id": "T02",
+      "source_hint": "运维助手",
+      "warmup": "在吗",
+      "question": "登录那个小工具的密码想改一下，入口一般在哪？",
+      "followup": "改密码要填旧密码吗？"
+    },
+    {
+      "id": "T03",
+      "source_hint": "运维助手",
+      "warmup": "你好",
+      "question": "测试环境和线上环境的服务器信息是不是得分开维护？",
+      "followup": "升级完怎么验证环境对不对？"
+    },
+    {
+      "id": "T04",
+      "source_hint": "运维助手",
+      "warmup": "打扰一下",
+      "question": "系统弹报错编码了，有没有地方能查这些码是啥意思？",
+      "followup": "能新增一条报错说明吗？"
+    },
+    {
+      "id": "T05",
+      "source_hint": "运维助手",
+      "warmup": "在的",
+      "question": "要给仓库软件升版本，是不是得先选正式还是测试？",
+      "followup": "上传完包之后还要检查路径吗？"
+    },
+    {
+      "id": "T06",
+      "source_hint": "运维助手",
+      "warmup": "你好呀",
+      "question": "版本升完怎么确认真的成功了？",
+      "followup": "升级记录能看历史吗？"
+    },
+    {
+      "id": "T07",
+      "source_hint": "运维助手",
+      "warmup": "问个事",
+      "question": "升级搞错了能不能退回去？",
+      "followup": "回滚时数据库脚本会自动退吗？"
+    },
+    {
+      "id": "T08",
+      "source_hint": "运维助手",
+      "warmup": "在吗",
+      "question": "基础数据字典是在哪个菜单维护的？",
+      "followup": "字典里能改编码吗？"
+    },
+    {
+      "id": "T09",
+      "source_hint": "云盒培训",
+      "warmup": "我是新来的",
+      "question": "听同事说有个小盒子连仓库，那是干啥用的啊？",
+      "followup": "第一次用要注意啥？"
+    },
+    {
+      "id": "T10",
+      "source_hint": "云盒培训",
+      "warmup": "你好",
+      "question": "云盒到手了不会装，有没有大概步骤？",
+      "followup": "装完怎么确认连上了？"
+    },
+    {
+      "id": "T11",
+      "source_hint": "云盒培训",
+      "warmup": "在吗",
+      "question": "盒子连不上网一般先查哪几项？",
+      "followup": "网线灯不亮算啥情况？"
+    },
+    {
+      "id": "T12",
+      "source_hint": "云盒培训",
+      "warmup": "打扰",
+      "question": "设备要注册是在哪儿操作来着？",
+      "followup": "注册失败常见原因是啥？"
+    },
+    {
+      "id": "T13",
+      "source_hint": "云盒培训",
+      "warmup": "你好呀",
+      "question": "盒子上指示灯闪法不一样代表啥？",
+      "followup": "红灯常亮严重吗？"
+    },
+    {
+      "id": "T14",
+      "source_hint": "云盒培训",
+      "warmup": "问下",
+      "question": "好几台盒子一起管的话在哪看状态？",
+      "followup": "能批量重启吗？"
+    },
+    {
+      "id": "T15",
+      "source_hint": "云盒培训",
+      "warmup": "在吗",
+      "question": "云盒和仓库系统数据怎么对上号的？",
+      "followup": "对接失败先查哪？"
+    },
+    {
+      "id": "T16",
+      "source_hint": "WMS报错",
+      "warmup": "你好，遇到个报错",
+      "question": "电脑打单时突然说找不到打印模板，这通常咋回事？",
+      "followup": "50K01这个码是不是就这问题？"
+    },
+    {
+      "id": "T17",
+      "source_hint": "WMS报错",
+      "warmup": "在吗",
+      "question": "PDA提交老提示重复，是不是后台还在跑任务？",
+      "followup": "50M01说要等同步，一般等多久？"
+    },
+    {
+      "id": "T18",
+      "source_hint": "WMS报错",
+      "warmup": "你好，遇到个报错",
+      "question": "删物料信息删不掉，说还有库存记录，啥意思？",
+      "followup": "51K04是不是就得先清库存？"
+    },
+    {
+      "id": "T19",
+      "source_hint": "WMS报错",
+      "warmup": "你好",
+      "question": "扫描完点提交说没有可提交记录，是我扫错了吗？",
+      "followup": "60J19跟账号有关系吗？"
+    },
+    {
+      "id": "T20",
+      "source_hint": "WMS报错",
+      "warmup": "在的",
+      "question": "装箱时提示不能重复扫描同一箱码，怎么处理？",
+      "followup": "61J84是不是这情况？"
+    },
+    {
+      "id": "T21",
+      "source_hint": "WMS报错",
+      "warmup": "打扰",
+      "question": "报错说流程编号不能为空，要去哪配置？",
+      "followup": "61K01说的是这个吗？"
+    },
+    {
+      "id": "T22",
+      "source_hint": "WMS报错",
+      "warmup": "你好呀",
+      "question": "数据同步等半天没动静，正常吗？",
+      "followup": "能不能只停同步不停整个系统？"
+    },
+    {
+      "id": "T23",
+      "source_hint": "WMS报错",
+      "warmup": "在吗",
+      "question": "提示本地模板文件不存在，是要重新上传吗？",
+      "followup": "60J18跟jasper有关系吗？"
+    },
+    {
+      "id": "T24",
+      "source_hint": "WMS报错",
+      "warmup": "在吗",
+      "question": "PDA保存后提交说可用库存不够，怎么排查？",
+      "followup": "61K69是不是占用库存导致的？"
+    },
+    {
+      "id": "T25",
+      "source_hint": "运维助手",
+      "warmup": "我是新来的",
+      "question": "那个智联的运维小助手主要能帮我干哪些事？",
+      "followup": "跟仓库主系统是啥关系？"
+    },
+    {
+      "id": "T26",
+      "source_hint": "混合",
+      "warmup": "你好",
+      "question": "仓库软件升级和普通软件升级有啥不一样要注意的？",
+      "followup": "路径填错了会怎样？"
+    },
+    {
+      "id": "T27",
+      "source_hint": "WMS报错",
+      "warmup": "在吗",
+      "question": "装配时提示批次不能混装，要先做啥？",
+      "followup": "61J88是不是混装问题？"
+    },
+    {
+      "id": "T28",
+      "source_hint": "WMS报错",
+      "warmup": "你好",
+      "question": "61J79和61J80看着差不多，区别是啥？",
+      "followup": "要去哪个菜单改规则？"
+    },
+    {
+      "id": "T29",
+      "source_hint": "运维助手",
+      "warmup": "随便问下",
+      "question": "日志详情里能看到接口耗时吗，152毫秒算慢吗？",
+      "followup": "能下载原始日志文件吗？"
+    },
+    {
+      "id": "T30",
+      "source_hint": "混合",
+      "warmup": "最后问一个",
+      "question": "云盒、运维助手、WMS这三块出问题时我先找谁看啥？",
+      "followup": "有没有推荐的排查顺序？"
+    }
+  ]
+}
