@@ -22,6 +22,54 @@ TASK_STORE_FILE = BACKEND_ROOT / "data" / "multimodal_tasks.json"
 
 _tasks: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
+# 取消标记独立于任务记录，避免 UI 删除后后台线程无法感知
+_cancel_flags: dict[str, bool] = {}
+
+
+class TaskCancelledError(Exception):
+    """用户主动取消多模态处理任务。"""
+
+
+def is_cancel_requested(task_id: str) -> bool:
+    if not task_id:
+        return False
+    if _cancel_flags.get(task_id):
+        return True
+    task = _tasks.get(task_id)
+    return bool(task and task.get("status") == "cancelled")
+
+
+def ensure_not_cancelled(task_id: str) -> None:
+    if is_cancel_requested(task_id):
+        raise TaskCancelledError(f"任务 {task_id} 已被用户取消")
+
+
+def request_cancel(task_id: str) -> bool:
+    """请求取消任务（运行中任务会在流水线检查点退出）。"""
+    task = _tasks.get(task_id)
+    if not task:
+        _cancel_flags[task_id] = True
+        return False
+    _cancel_flags[task_id] = True
+    if task.get("status") in ("pending", "running"):
+        now = datetime.now(timezone.utc).isoformat()
+        task["status"] = "cancelled"
+        task["stage_label"] = "用户已取消"
+        task["updated_at"] = now
+        task["completed_at"] = now
+        add_log(task_id, "用户已请求取消，正在停止后台处理…", "WARN")
+        with _lock:
+            _persist()
+        logger.info(
+            "[多模态文档-任务取消|multimodal_task_manager.request_cancel|task_id=%s|硬编执行|已标记] status=cancelled",
+            task_id,
+        )
+        return True
+    return False
+
+
+def clear_cancel_flag(task_id: str) -> None:
+    _cancel_flags.pop(task_id, None)
 
 # ── 文档处理阶段定义 ──────────────────────────────────────
 
@@ -90,10 +138,16 @@ def get_task(task_id: str) -> dict[str, Any] | None:
     return _tasks.get(task_id)
 
 
-def list_tasks(status: str = "", limit: int = 50) -> list[dict[str, Any]]:
-    """列出所有任务，按创建时间倒序"""
+def list_tasks(
+    status: str = "",
+    limit: int = 50,
+    tenant_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """列出任务，按创建时间倒序；可按用户 tenant_id 过滤。"""
     with _lock:
         tasks = list(_tasks.values())
+    if tenant_id is not None:
+        tasks = [t for t in tasks if t.get("tenant_id") == tenant_id]
     if status:
         tasks = [t for t in tasks if t["status"] == status]
     tasks.sort(key=lambda t: t["created_at"], reverse=True)
@@ -103,7 +157,9 @@ def list_tasks(status: str = "", limit: int = 50) -> list[dict[str, Any]]:
 def update_task(task_id: str, **kwargs: Any) -> None:
     """更新任务字段"""
     task = _tasks.get(task_id)
-    if not task or task["status"] == "completed":
+    if not task or task["status"] in ("completed", "cancelled"):
+        return
+    if is_cancel_requested(task_id):
         return
     kwargs["updated_at"] = datetime.now(timezone.utc).isoformat()
     task.update(kwargs)
@@ -113,6 +169,8 @@ def update_task(task_id: str, **kwargs: Any) -> None:
 
 def start_stage(task_id: str, stage_id: str) -> None:
     """标记一个处理阶段开始"""
+    if is_cancel_requested(task_id):
+        return
     task = _tasks.get(task_id)
     if not task:
         return
@@ -182,12 +240,22 @@ def add_log(task_id: str, message: str, level: str = "INFO") -> None:
         _persist()
 
 
-def delete_task(task_id: str) -> bool:
+def cancel_task(task_id: str) -> bool:
+    """取消并移除任务记录；运行中任务保留取消标记供后台线程退出。"""
+    was_active = request_cancel(task_id)
+    return delete_task(task_id, keep_cancel_flag=was_active)
+
+
+def delete_task(task_id: str, *, keep_cancel_flag: bool = False) -> bool:
     with _lock:
         if task_id in _tasks:
             del _tasks[task_id]
             _persist()
+            if not keep_cancel_flag:
+                clear_cancel_flag(task_id)
             return True
+    if not keep_cancel_flag:
+        clear_cancel_flag(task_id)
     return False
 
 

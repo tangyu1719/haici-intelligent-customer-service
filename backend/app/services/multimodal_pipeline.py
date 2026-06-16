@@ -9,7 +9,13 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import KnowledgeDocument
 from app.services.knowledge_processor import ingest_uploaded_document
-from app.services.multimodal_task_manager import add_log, fail_stage, update_task
+from app.services.multimodal_task_manager import (
+    TaskCancelledError,
+    add_log,
+    clear_cancel_flag,
+    fail_stage,
+    update_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +57,23 @@ def run_ingest_in_background(
                 task_id,
                 summary.get("chunk_count"),
             )
+        except TaskCancelledError as exc:
+            err = str(exc)[:500]
+            logger.info(
+                "[多模态文档-MD改造|multimodal_pipeline.run_ingest_in_background|doc_id=%s|硬编执行|用户取消] task_id=%s",
+                document_id,
+                task_id,
+            )
+            try:
+                doc = db.get(KnowledgeDocument, document_id)
+                if doc and doc.status == "processing":
+                    doc.status = "failed"
+                    doc.error_message = "用户已取消处理"
+                    db.commit()
+            except Exception:
+                db.rollback()
+            add_log(task_id, "任务已被用户取消", "WARN")
+            update_task(task_id, status="cancelled", stage_label="用户已取消", error=err[:300])
         except Exception as exc:  # noqa: BLE001
             err = str(exc)[:500]
             logger.exception(
@@ -69,6 +92,7 @@ def run_ingest_in_background(
                 db.rollback()
             fail_stage(task_id, "normalize", err[:300])
         finally:
+            clear_cancel_flag(task_id)
             db.close()
 
     threading.Thread(

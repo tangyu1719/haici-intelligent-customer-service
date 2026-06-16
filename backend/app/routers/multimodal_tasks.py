@@ -23,15 +23,17 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import KnowledgeBase, KnowledgeDocument, User
+from app.services.haici_output import kb_assets_dir
 from app.services.multimodal_pipeline import run_ingest_in_background
 from app.services.multimodal_task_manager import (
+    cancel_task,
     create_task,
-    delete_task,
     get_task,
     list_tasks,
     load_from_disk,
     update_task,
 )
+from app.vectorstore import delete_by_document
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/multimodal-tasks", tags=["多模态任务"])
@@ -146,12 +148,12 @@ async def upload_and_process(
 
 @router.get("")
 def get_tasks(
-    status: str = Query("", description="筛选状态 pending/running/completed/failed"),
+    status: str = Query("", description="筛选状态 pending/running/completed/failed/cancelled"),
     limit: int = Query(50, ge=1, le=200),
-    _user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """获取任务列表"""
-    tasks = list_tasks(status=status, limit=limit)
+    """获取当前用户的多模态任务列表"""
+    tasks = list_tasks(status=status, limit=limit, tenant_id=current_user.id)
     return {
         "ok": True,
         "tasks": [
@@ -178,10 +180,10 @@ def get_tasks(
 
 
 @router.get("/{task_id}")
-def get_task_detail(task_id: str, _user=Depends(get_current_user)) -> dict[str, Any]:
+def get_task_detail(task_id: str, current_user: User = Depends(get_current_user)) -> dict[str, Any]:
     """获取任务详情（含完整日志和阶段状态）"""
     t = get_task(task_id)
-    if not t:
+    if not t or t.get("tenant_id") != current_user.id:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {
         "ok": True,
@@ -254,7 +256,38 @@ async def stream_task_logs(task_id: str):
 
 
 @router.delete("/{task_id}")
-def remove_task(task_id: str, _user=Depends(get_current_user)) -> dict[str, Any]:
-    """删除任务记录"""
-    ok = delete_task(task_id)
-    return {"ok": ok}
+def remove_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """取消/删除任务；运行中会停止后台处理并清理 processing 状态的关联文档。"""
+    t = get_task(task_id)
+    if not t or t.get("tenant_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    was_active = t.get("status") in ("pending", "running")
+    doc_id = t.get("document_id")
+
+    ok = cancel_task(task_id)
+
+    if doc_id and was_active:
+        doc = db.get(KnowledgeDocument, doc_id)
+        if doc and doc.user_id == current_user.id and doc.status == "processing":
+            delete_by_document(doc_id, tenant_id=str(current_user.id))
+            try:
+                Path(doc.storage_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+            asset_root = kb_assets_dir(current_user.id, doc_id)
+            if asset_root.is_dir():
+                shutil.rmtree(asset_root, ignore_errors=True)
+            db.delete(doc)
+            db.commit()
+            logger.info(
+                "[多模态文档-任务取消|multimodal_tasks.remove_task|doc_id=%s|硬编执行|已清理] task_id=%s",
+                doc_id,
+                task_id,
+            )
+
+    return {"ok": ok, "cancelled": was_active}
