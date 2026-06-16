@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { authHeaders } from '../api/auth'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { authHeaders, hasPerm } from '../api/auth'
 import ListPagination from './ListPagination.vue'
 import ListQueryBar from './ListQueryBar.vue'
+import RolePermissionsPanel from './RolePermissionsPanel.vue'
+import SystemSettingsPanel from './SystemSettingsPanel.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
+
+type TabKey = 'users' | 'roles' | 'settings'
 
 interface RoleItem {
   code: string
@@ -36,6 +41,34 @@ const roleFilter = ref('')
 const quotaSettings = ref({ daily_question_limit: 100, daily_question_limit_admin: 0 })
 const savingId = ref<number | null>(null)
 const msg = ref('')
+const route = useRoute()
+const router = useRouter()
+const activeTab = ref<TabKey>('users')
+
+const canRolesTab = computed(() => hasPerm('system:rbac:roles') || hasPerm('system:rbac:users'))
+const canSettingsTab = computed(() => hasPerm('system:settings:manage'))
+
+const syncTabFromRoute = (): void => {
+  if (route.path === '/admin/rbac') {
+    activeTab.value = 'roles'
+    return
+  }
+  if (route.path === '/admin/system-settings') {
+    activeTab.value = 'settings'
+    return
+  }
+  const t = String(route.query.tab || '')
+  if (t === 'roles' && canRolesTab.value) activeTab.value = 'roles'
+  else if (t === 'settings' && canSettingsTab.value) activeTab.value = 'settings'
+  else activeTab.value = 'users'
+}
+
+const setTab = (tab: TabKey): void => {
+  activeTab.value = tab
+  if (tab === 'roles') router.replace('/admin/rbac')
+  else if (tab === 'settings') router.replace('/admin/system-settings')
+  else router.replace('/admin/users')
+}
 
 const sortOptions = [
   { value: 'created_at', label: '注册时间' },
@@ -152,9 +185,16 @@ const toggleStatus = async (row: UserAdminItem): Promise<void> => {
   }
 }
 
+const viewUserSessions = (row: UserAdminItem): void => {
+  router.push({ path: '/sessions', query: { user_id: String(row.id) } })
+}
+
 watch(() => [query.value.page, query.value.size], loadUsers)
+watch(() => route.query.tab, syncTabFromRoute)
+watch(() => route.path, syncTabFromRoute)
 
 onMounted(async () => {
+  syncTabFromRoute()
   await Promise.all([loadRoles(), loadQuotaSettings()])
   await loadUsers()
 })
@@ -165,16 +205,48 @@ onMounted(async () => {
     <header class="panel-hd">
       <div>
         <h2 class="panel-title">用户权限管理</h2>
-        <p class="panel-sub">
+        <p v-if="activeTab === 'users'" class="panel-sub">
           普通用户每日提问上限 <strong>{{ quotaSettings.daily_question_limit }}</strong> 次（环境变量
           <code>DAILY_QUESTION_LIMIT</code>）；
           管理员默认
           <strong>{{ quotaSettings.daily_question_limit_admin <= 0 ? '不限次' : quotaSettings.daily_question_limit_admin + ' 次' }}</strong>
           （<code>DAILY_QUESTION_LIMIT_ADMIN</code>）
         </p>
+        <p v-else-if="activeTab === 'roles'" class="panel-sub">
+          分页浏览角色、搜索筛选，勾选模块权限（含「查看全部用户会话」「会话审计」等）
+        </p>
+        <p v-else class="panel-sub">全局运行参数，如活跃会话落库间隔</p>
       </div>
     </header>
 
+    <nav class="admin-tabs" aria-label="用户权限子页">
+      <button type="button" class="admin-tab" :class="{ active: activeTab === 'users' }" @click="setTab('users')">
+        用户列表
+      </button>
+      <button
+        v-if="canRolesTab"
+        type="button"
+        class="admin-tab"
+        :class="{ active: activeTab === 'roles' }"
+        @click="setTab('roles')"
+      >
+        角色权限
+      </button>
+      <button
+        v-if="canSettingsTab"
+        type="button"
+        class="admin-tab"
+        :class="{ active: activeTab === 'settings' }"
+        @click="setTab('settings')"
+      >
+        系统设置
+      </button>
+    </nav>
+
+    <RolePermissionsPanel v-if="activeTab === 'roles'" embedded />
+    <SystemSettingsPanel v-else-if="activeTab === 'settings'" embedded />
+
+    <template v-else>
     <ListQueryBar
       v-model="query"
       :sort-options="sortOptions"
@@ -257,14 +329,19 @@ onMounted(async () => {
             <td>{{ quotaText(row) }}</td>
             <td>{{ fmtDateTime(row.created_at) }}</td>
             <td>
-              <button
-                type="button"
-                class="action-btn"
-                :disabled="savingId === row.id"
-                @click="toggleStatus(row)"
-              >
-                {{ row.status === 1 ? '禁用' : '启用' }}
-              </button>
+              <div class="action-group">
+                <button
+                  type="button"
+                  class="action-btn"
+                  :disabled="savingId === row.id"
+                  @click="toggleStatus(row)"
+                >
+                  {{ row.status === 1 ? '禁用' : '启用' }}
+                </button>
+                <button type="button" class="action-btn secondary" @click="viewUserSessions(row)">
+                  会话历史
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -272,6 +349,7 @@ onMounted(async () => {
     </div>
 
     <ListPagination v-model:page="query.page" v-model:size="query.size" :total="total" @change="loadUsers" />
+    </template>
   </div>
 </template>
 
@@ -399,6 +477,46 @@ onMounted(async () => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.action-btn.secondary {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(54, 62, 66, 0.1);
+  padding-bottom: 8px;
+}
+
+.admin-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.admin-tab:hover {
+  background: #f1f5f9;
+}
+
+.admin-tab.active {
+  background: #1e293b;
+  color: #fff;
+  border-color: #1e293b;
+}
+
 .action-btn {
   font-size: 11px;
   font-weight: 700;
