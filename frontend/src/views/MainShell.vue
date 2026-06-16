@@ -12,14 +12,14 @@ import EvalDashboard from '../components/EvalDashboard.vue'
 import FeedbackAdminPanel from '../components/FeedbackAdminPanel.vue'
 import ChatSessionAdminPanel from '../components/ChatSessionAdminPanel.vue'
 import AdminUsersPanel from '../components/AdminUsersPanel.vue'
+import UserProfilesAdminPanel from '../components/UserProfilesAdminPanel.vue'
 import ChatFaqAdminPanel from '../components/ChatFaqAdminPanel.vue'
 import ListPagination from '../components/ListPagination.vue'
 import ListQueryBar from '../components/ListQueryBar.vue'
 import MultimodalPanel from '../components/MultimodalPanel.vue'
 import StructuredPanel from '../components/StructuredPanel.vue'
-import RolePermissionsPanel from '../components/RolePermissionsPanel.vue'
-import SystemSettingsPanel from '../components/SystemSettingsPanel.vue'
 import ProfileFeedbackPanel from '../components/ProfileFeedbackPanel.vue'
+import UserProfileMemoryPanel from '../components/UserProfileMemoryPanel.vue'
 import SessionHistoryPanel from '../components/SessionHistoryPanel.vue'
 import LogManagementPanel from '../components/logs/LogManagementPanel.vue'
 import type { LogKind } from '../components/logs/LogManagementPanel.vue'
@@ -52,6 +52,7 @@ const selectedKbId = ref<number | null>(null)
 const kbCreating = ref(false)
 const kbCreateName = ref('')
 const kbCreateDesc = ref('')
+const kbDeletingId = ref<number | null>(null)
 const profileNickname = ref('')
 const profilePhone = ref('')
 const profilePhoneCode = ref('')
@@ -112,6 +113,7 @@ const pageTitle = computed(() => {
     '/sessions': '会话历史',
     '/profile': '基本资料',
     '/profile/feedback': '回答反馈记录',
+    '/profile/memory': '我的画像',
     '/admin/logs/operation': '操作日志',
     '/admin/logs/error': '异常日志',
     '/admin/logs/api-call': 'API 调用日志',
@@ -128,6 +130,7 @@ const pageTitle = computed(() => {
     '/admin/feedback': '用户反馈',
     '/admin/sessions': '会话审计',
     '/admin/users': '用户权限',
+    '/admin/user-profiles': '用户画像',
     '/admin/chat-faq': '对话 FAQ',
   }
   return map[route.path] || 'HaiCi 智能客服'
@@ -296,9 +299,23 @@ const uploadKnowledge = async (event: Event): Promise<void> => {
   await loadKnowledge()
 }
 
-const deleteKnowledge = async (id: number): Promise<void> => {
-  await fetch(`/api/v1/knowledge/${id}`, { method: 'DELETE', headers: authHeaders() })
-  await loadKnowledge()
+const deleteKnowledge = async (id: number, e?: Event): Promise<void> => {
+  e?.stopPropagation()
+  if (kbDeletingId.value) return
+  if (!window.confirm('确定删除该文档？删除后将从知识库移除，相关向量分块一并清理。')) return
+  kbDeletingId.value = id
+  try {
+    const res = await fetch(`/api/v1/knowledge/${id}`, { method: 'DELETE', headers: authHeaders() })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      alert(typeof data.detail === 'string' ? data.detail : '删除失败，请稍后重试')
+      return
+    }
+    await loadKnowledge()
+    await loadKbList()
+  } finally {
+    kbDeletingId.value = null
+  }
 }
 
 const sendProfileCode = async (): Promise<void> => {
@@ -349,6 +366,7 @@ watch(
     }
     if (p === '/profile') await loadMe()
     if (p === '/profile/feedback') { /* ProfileFeedbackPanel 自加载 */ }
+    if (p === '/profile/memory') { /* UserProfileMemoryPanel 自加载 */ }
   },
   { immediate: true }
 )
@@ -607,7 +625,17 @@ onMounted(async () => {
                 </td>
                 <td class="p-3">{{ d.status }}</td>
                 <td class="p-3">{{ d.chunk_count }}</td>
-                <td class="p-3"><button v-if="hasPerm('kb:delete')" class="text-red-500" @click="deleteKnowledge(d.id)">删除</button></td>
+                <td class="p-3">
+                  <button
+                    v-if="hasPerm('kb:delete')"
+                    type="button"
+                    class="text-red-500 disabled:opacity-40"
+                    :disabled="kbDeletingId === d.id"
+                    @click="deleteKnowledge(d.id, $event)"
+                  >
+                    {{ kbDeletingId === d.id ? '删除中…' : '删除' }}
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -620,9 +648,11 @@ onMounted(async () => {
       <EvalDashboard v-else-if="route.path === '/admin/eval'" class="flex-1 p-6 overflow-y-auto" />
       <FeedbackAdminPanel v-else-if="route.path === '/admin/feedback'" class="flex-1 p-6 overflow-y-auto" />
       <ChatSessionAdminPanel v-else-if="route.path === '/admin/sessions'" class="flex-1 p-6 overflow-hidden flex flex-col min-h-0" />
-      <AdminUsersPanel v-else-if="route.path === '/admin/users'" class="flex-1 p-6 overflow-y-auto" />
-      <RolePermissionsPanel v-else-if="route.path === '/admin/rbac'" class="flex-1 overflow-y-auto" />
-      <SystemSettingsPanel v-else-if="route.path === '/admin/system-settings'" class="flex-1 overflow-y-auto" />
+      <UserProfilesAdminPanel v-else-if="route.path === '/admin/user-profiles'" class="flex-1 p-6 overflow-y-auto" />
+      <AdminUsersPanel
+        v-else-if="route.path === '/admin/users' || route.path === '/admin/rbac' || route.path === '/admin/system-settings'"
+        class="flex-1 p-6 overflow-y-auto"
+      />
       <ChatFaqAdminPanel v-else-if="route.path === '/admin/chat-faq'" class="flex-1 p-6 overflow-y-auto" />
       <PipelineSettingsPanel v-else-if="route.path === '/admin/pipeline'" class="flex-1 overflow-y-auto" />
       <AgentConfigPanel v-else-if="route.path === '/admin/agent-config'" class="flex-1 overflow-y-auto" />
@@ -634,6 +664,8 @@ onMounted(async () => {
       <LogManagementPanel v-else-if="route.path.startsWith('/admin/logs/')" :key="adminLogKind" :kind="adminLogKind" class="flex-1 overflow-hidden flex flex-col min-h-0" />
 
       <ProfileFeedbackPanel v-else-if="route.path === '/profile/feedback'" class="flex-1 p-6 overflow-y-auto" />
+
+      <UserProfileMemoryPanel v-else-if="route.path === '/profile/memory'" class="flex-1 p-6 overflow-y-auto" />
 
       <div v-else-if="route.path === '/profile'" class="flex-1 p-6 overflow-y-auto">
         <div class="max-w-md mx-auto bg-white rounded-2xl border p-6 space-y-3">

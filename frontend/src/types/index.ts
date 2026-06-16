@@ -69,6 +69,20 @@ export interface ChatMessage {
   thinkCollapsed?: boolean
   /** 检索到的知识库片段数 */
   retrievalCount?: number
+  /** ReAct 推理步骤（thought/act/observe） */
+  reactSteps?: ReactStep[]
+  /** 是否 ReAct 模式 */
+  reactMode?: boolean
+}
+
+export interface ReactStep {
+  step: number
+  phase: 'thought' | 'act' | 'observe'
+  content: string
+  streaming?: boolean
+  tool?: string
+  toolQuery?: string
+  sliceCount?: number
 }
 
 export interface ChatFaqItem {

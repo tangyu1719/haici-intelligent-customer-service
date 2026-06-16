@@ -11,6 +11,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/sessions', name: 'sessions', component: () => import('../views/MainShell.vue'), meta: { permission: 'session:view' } },
   { path: '/profile', name: 'profile', component: () => import('../views/MainShell.vue'), meta: { permission: 'profile:view' } },
   { path: '/profile/feedback', name: 'profile-feedback', component: () => import('../views/MainShell.vue'), meta: { permission: 'profile:feedback:view' } },
+  { path: '/profile/memory', name: 'profile-memory', component: () => import('../views/MainShell.vue'), meta: { permission: 'profile:memory:edit' } },
   { path: '/admin/logs/operation', name: 'log-operation', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:log:operation' } },
   { path: '/admin/logs/error', name: 'log-error', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:log:error' } },
   { path: '/admin/logs/api-call', name: 'log-api', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:log:api' } },
@@ -26,7 +27,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/admin/system-settings', name: 'admin-system-settings', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:settings:manage' } },
   { path: '/admin/feedback', name: 'admin-feedback', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:feedback:view' } },
   { path: '/admin/sessions', name: 'admin-sessions', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:session:view' } },
-  { path: '/admin/users', name: 'admin-users', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:rbac:users' } },
+  { path: '/admin/users', name: 'admin-users', component: () => import('../views/MainShell.vue'), meta: { permission: ['system:rbac:users', 'system:rbac:roles', 'system:settings:manage'] } },
+  { path: '/admin/user-profiles', name: 'admin-user-profiles', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:user_profile:view' } },
   { path: '/admin/chat-faq', name: 'admin-chat-faq', component: () => import('../views/MainShell.vue'), meta: { permission: 'system:faq:manage' } },
   { path: '/403', name: 'forbidden', component: () => import('../views/ForbiddenView.vue'), meta: { public: true } },
 ]
@@ -46,17 +48,23 @@ function getUser(): { permissions?: string[]; roles?: string[] } | null {
   }
 }
 
-router.beforeEach((to) => {
-  if (to.meta.public) return true
-  loadAuthFromStorage()
-  if (!isAuthenticated()) return { path: '/login', query: { redirect: to.fullPath } }
-  const perm = to.meta.permission as string | undefined
+function hasRoutePermission(perm: string | string[] | undefined): boolean {
   if (!perm) return true
   const user = getUser()
   const perms = user?.permissions || []
   const roles = user?.roles || []
-  if (roles.includes('admin') || perms.includes(perm)) return true
-  return { path: '/403' }
+  if (roles.includes('admin')) return true
+  const required = Array.isArray(perm) ? perm : [perm]
+  return required.some((p) => perms.includes(p))
+}
+
+router.beforeEach((to) => {
+  if (to.meta.public) return true
+  loadAuthFromStorage()
+  if (!isAuthenticated()) return { path: '/login', query: { redirect: to.fullPath } }
+  const perm = to.meta.permission as string | string[] | undefined
+  if (!hasRoutePermission(perm)) return { path: '/403' }
+  return true
 })
 
 export default router
