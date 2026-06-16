@@ -1,10 +1,10 @@
-# SPEC · RAG 文档标准化（含 DOCX/PDF 图片处理）
+﻿# SPEC · RAG 文档标准化（含 DOCX/PDF 图片处理）
 
 > **模块**：知识库 / 多模态文档入库  
 > **版本**：v0.1  
 > **日期**：2026-06-12  
 > **状态**：已批准 · 实施中（Owner 2026-06-12 裁决）  
-> **PRD**：`HaiCi笔试_AI 智能客服系统.md`（只读）  
+> **产品需求文档**：`HaiCi笔试_AI 智能客服系统_PRD.md`（只读）  
 > **关联 SPEC**：`SPEC-AI问答Agent.md`（分块策略已实施）、`docs/AI架构设计.md`
 
 ---
@@ -17,13 +17,13 @@
 
 ### 分类路径
 
-`产品研发` → `SPEC·实施规格` → `HaiChiAgent/知识库` → `document_normalization`
+`产品研发` → `SPEC·实施规格` → `HaiCiAgent/知识库` → `document_normalization`
 
 | 层级 | 值 |
 |------|-----|
 | L1 领域 | 产品研发 |
 | L2 类型 | SPEC·实施规格 |
-| L3 模块 | HaiChiAgent / RAG 知识库 |
+| L3 模块 | HaiCiAgent / RAG 知识库 |
 | L4 | `backend/app/services/`（`knowledge_processor` · `document` · 新增 `doc_image_pipeline`） |
 
 ### 版本与修订（Git 式）
@@ -65,12 +65,12 @@
 
 ### 1.1 背景
 
-- PRD 要求知识库支持 **txt / md / pdf** 上传并向量化；HaiChi 已扩展 docx、图片等多模态入口。
+- PRD 要求知识库支持 **txt / md / pdf** 上传并向量化；HaiCi 已扩展 docx、图片等多模态入口。
 - 已实施 **RAG 分块策略模块化**（`kb_chunk_service.py`），但入库前 **文档正文标准化** 仍不足：DOCX/PDF 内嵌图未统一抽链、未分类、未保证链接可引用。
 - 上级工程 `src/agent` 已有能力可复用：
   - `mineru_processor.py`：DOCX 混排解析、PDF pipeline、百度 OCR + 本地 pytesseract、VLM 理解
   - `vlm_image_understander.py`：Doubao-Seed vision（流程图 / 接口图 / 图表 / 通用描述）
-  - `flowchart_scoring_pipeline.py`：流程图 CV 分块（HaiChi 已通过 `flowchart_scoring_service.py` 封装）
+  - `flowchart_scoring_pipeline.py`：流程图 CV 分块（HaiCi 已通过 `flowchart_scoring_service.py` 封装）
 
 ### 1.2 范围内
 
@@ -152,7 +152,7 @@ DOCX
  → 解析 body 顺序（段落 / 表格 / 内嵌图）
  → 每遇内嵌图：写出 images/img_N.ext
  → MD 中写入：<!-- IMG:img_N --> + ![alt](public_url)
- → 本地 OCR（pytesseract / MinerU._local_ocr_fallback，与 web_rebuild 一致）
+ → 本地 OCR（pytesseract / MinerU._local_ocr_fallback，与本系统一致）
  → VLM 分类 + 分路由（§7）
  → 回插 OCR/VLM/流程图文本块至占位符下方
  → normalized.md / manifest.json
@@ -248,7 +248,7 @@ PDF 内 `images/` 目录与 MD 链接规则 **同 DOCX**（§6）。MinerU 产�
 
 ### 8.1 现状
 
-HaiChi 已封装：
+HaiCi 已封装：
 
 - `backend/app/services/flowchart_scoring_service.py` → `src/agent/tools/flowchart_scoring_pipeline.py`
 - 多模态页 `/api/v1/multimodal/flowchart/score` 可独立调用

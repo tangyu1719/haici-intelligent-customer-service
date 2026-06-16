@@ -1,20 +1,20 @@
-# PLAN · 对话页健康检查与会话侧栏
+﻿# PLAN · 对话页健康检查与会话侧栏
 
 ## 0. 文档元数据、摘要与定位
 
 ### 一句话摘要
 
-在对话页引入 web_rebuild 同源的平台健康探测条、左侧竖向会话列表，并修复 SSE 流式期间的空气泡/竖线闪烁与 `DetachedInstanceError` 导致的「对话服务异常」。
+在对话页引入 平台健康探测条、左侧竖向会话列表，并修复 SSE 流式期间的空气泡/竖线闪烁与 `DetachedInstanceError` 导致的「对话服务异常」。
 
 ### 分类路径
 
-`产品研发` → `PLAN·实施计划` → `HaiChiAgent/对话页` → `ChatPanel + platform_health`
+`产品研发` → `PLAN·实施计划` → `HaiCiAgent/对话页` → `ChatPanel + platform_health`
 
 | 层级 | 值 |
 |------|-----|
 | L1 领域 | 产品研发 |
 | L2 类型 | PLAN·实施计划 |
-| L3 模块 | HaiChiAgent / 智能对话 |
+| L3 模块 | HaiCiAgent / 智能对话 |
 | L4 | `ChatPanel.vue`、`platform_health.py` |
 
 ### 版本与修订
@@ -46,7 +46,7 @@
 |------|------|------|
 | 加载时出现空气泡 + 竖线 | 发送即插入空 `assistant` 消息并叠加光标 + 独立 wave-loader | 等待期仅显示 wave-loader；首 token 再创建助手气泡 |
 | 「对话服务异常」 | SSE 生成器内访问 `current_user.id`，请求 Session 已关闭 → `DetachedInstanceError` | 生成器使用独立 `SessionLocal`，入口固化 `user_id` |
-| 无健康状态 | 未移植 web_rebuild 健康条 | 新增 `/api/v1/system/platform/health` |
+| 无健康状态 | 缺少健康条 | 新增 `/api/v1/system/platform/health` |
 | 无会话切换 | 对话页无侧栏 | `ChatPanel` 左侧会话列表，不引用任务结构 |
 
 ---
@@ -56,7 +56,7 @@
 ### 后端
 
 - `platform_health.py`：探测 MySQL、Chroma、嵌入模型路径、LLM 网关（轻量 ping）。
-- `GET /api/v1/system/platform/health`：返回 `{ ready, all_ok, summary, items[] }`，字段对齐 web_rebuild 前端。
+- `GET /api/v1/system/platform/health`：返回 `{ ready, all_ok, summary, items[] }`，字段前端。
 - `chat.py`：SSE 生成器独立 DB Session。
 
 ### 前端

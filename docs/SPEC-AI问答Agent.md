@@ -1,11 +1,11 @@
-# SPEC · AI 问答 Agent（RAG 核心模块）
+﻿# SPEC · AI 问答 Agent（RAG 核心模块）
 
 > **模块**：AI 问答 Agent  
 > **版本**：v0.2  
 > **日期**：2026-06-12  
 > **状态**：实施中  
-> **PRD**：`HaiCi笔试_AI 智能客服系统.md`（只读）  
-> **全链路 SPEC（RAG + 反馈 + 追问 + 意图纠偏）**：`SPEC-RAG问答全链路.md` ← **PRD RAG 相关需求整合真源**
+> **产品需求文档**：`HaiCi笔试_AI 智能客服系统_PRD.md`（只读）  
+> **全链路 SPEC（RAG + 反馈 + 追问 + 意图纠偏）**：`SPEC-RAG问答全链路.md`
 
 ---
 
@@ -13,17 +13,17 @@
 
 ### 一句话摘要
 
-构建**无 LangGraph** 的轻量固定节点 Pipeline，完成 PRD 要求的 RAG 问答链路，并对齐 web_rebuild 的意图识别、Query 改写、关键词提取、内部术语映射与向量检索；意图分解/增强本期不做。
+构建**无 LangGraph** 的轻量固定节点 Pipeline，完成 RAG 问答链路，并含意图识别、Query 改写、关键词提取、内部术语映射与向量检索；意图分解/增强本期不做。
 
 ### 分类路径
 
-`产品研发` → `SPEC·PRD` → `HaiChiAgent/AI问答` → `agent_pipeline`
+`产品研发` → `SPEC·PRD` → `HaiCiAgent/AI问答` → `agent_pipeline`
 
 | 层级 | 值 |
 |------|-----|
 | L1 领域 | 产品研发 |
 | L2 类型 | SPEC·实施规格 |
-| L3 模块 | HaiChiAgent / AI 问答 Agent |
+| L3 模块 | HaiCiAgent / AI 问答 Agent |
 | L4 | `backend/app/services/agent_pipeline.py` |
 
 ### 版本与修订
@@ -100,7 +100,7 @@
   → [8] 追问建议     generate_follow_ups（可选）
 ```
 
-对齐 web_rebuild 节点，**不含**：意图分解（decompose）、意图增强（enhance）。
+节点，**不含**：意图分解（decompose）、意图增强（enhance）。
 
 实现文件：
 
@@ -152,7 +152,7 @@
 - [x] 追问建议 SSE
 - [ ] 人工 RAG 质量回归（需知识库样例文档）
 - [ ] 多知识库路由
-- [x] 对话页健康检查条（对齐 web_rebuild）
+- [x] 对话页健康检查条
 - [x] 对话页左侧会话栏（无任务结构）
 - [x] 会话持久化：context_id + meta_json + 编辑/归档（见 `SPEC-会话持久化.md`）
 - [x] 加载态单一 wave-loader（无竖线空泡）
@@ -170,7 +170,7 @@
 |------|------|
 | 顶栏左 | 当前会话上下文名称（首问截断标题或「会话 #id」），**不**显示「智能客服会话」 |
 | 顶栏右 | 健康检查摘要 + 展开明细 + 刷新 |
-| 左侧栏 | 竖向会话列表、`+ 新对话`，**不含** web_rebuild 任务历史/子任务链 |
+| 左侧栏 | 竖向会话列表、`+ 新对话`，**不含** 外部任务历史/子任务链 |
 | 主区 | 消息流 + 单一加载动画 |
 
 ### 8.2 平台健康检查 API
@@ -178,7 +178,7 @@
 - 路径：`GET /api/v1/system/platform/health`
 - 探测项：`mysql`、`chroma`、`embedding`、`llm_gateway`
 - 响应：`{ ready, all_ok, summary:{ok,warn,error}, items:[{id,label,status,latency_ms,error,detail}] }`
-- 与 web_rebuild `/api/platform/health` 字段兼容，供对话页健康条消费。
+- 与 `/api/v1/system/platform/health` 字段一致，供对话页健康条消费。
 
 ### 8.3 流式加载规范
 

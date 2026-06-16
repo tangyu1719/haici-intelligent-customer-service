@@ -1,4 +1,4 @@
-# SPEC · 会话持久化与上下文标记
+﻿# SPEC · 会话持久化与上下文标记
 
 > **模块**：智能客服 / 会话管理  
 > **版本**：v0.1  
@@ -15,13 +15,13 @@
 
 ### 分类路径
 
-`产品研发` → `SPEC·PRD` → `HaiChiAgent/会话管理` → `chat_sessions`
+`产品研发` → `SPEC·PRD` → `HaiCiAgent/会话管理` → `chat_sessions`
 
 | 层级 | 值 |
 |------|-----|
 | L1 领域 | 产品研发 |
 | L2 类型 | SPEC·实施规格 |
-| L3 模块 | HaiChiAgent / 会话持久化 |
+| L3 模块 | HaiCiAgent / 会话持久化 |
 | L4 | `backend/app/routers/sessions.py` |
 
 ### 版本与修订

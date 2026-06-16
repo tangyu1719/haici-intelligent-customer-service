@@ -1,7 +1,7 @@
-# HaiChiAgent 面试问答：RAG 工程与 Agent 设计
+﻿# HaiCiAgent 技术问答：RAG 工程与 Agent 设计
 
-> **用途**：HaiCi 笔试 / 技术面试口述准备  
-> **项目**：HaiChiAgent 智能客服 RAG 系统  
+> **用途**：架构评审 / 技术方案深度说明  
+> **项目**：HaiCiAgent 企业级智能知识问答平台  
 > **更新**：2026-06-16  
 > **说明**：本文结合项目真实代码与文档，每条均给出「设计思路 → 代码通路 → 验证方式」。
 
@@ -15,7 +15,7 @@
 - [4. 知识库增量更新](#4-知识库增量更新)
 - [5. 大规模检索下的 LLM 执行保障（防注意力稀释）](#5-大规模检索下的-llm-执行保障防注意力稀释)
 - [6. 终极挑战：AI Agent 任务拆解能力](#6-终极挑战ai-agent-任务拆解能力)
-- [附录：面试速记](#附录面试速记)
+- [附录：技术要点速记](#附录技术要点速记)
 
 ---
 
@@ -64,7 +64,7 @@ elif not docs:
 - 兜底话术可在管理后台通过 `POST /api/v1/settings/fallback` 配置（`config.py` 中 `FALLBACK_NO_CONTEXT`）。
 - 业务流程文档（`docs/业务流程说明.md`）明确：知识库检索为空 → 返回 `FALLBACK_NO_CONTEXT`，不编造答案。
 
-**面试话术**：「我们把空检索当成一等公民分支，而不是 RAG 失败的边缘情况；产品侧可配置话术，工程侧保证零幻觉来源。」
+**表述要点**：「我们把空检索当成一等公民分支，而不是 RAG 失败的边缘情况；产品侧可配置话术，工程侧保证零幻觉来源。」
 
 ### 1.2 上下文超长
 
@@ -90,7 +90,7 @@ def history_char_budget() -> int:
 
 4. **文档标准化截断**：VLM 处理图片超上限时 `truncated=true`，校验器允许 MD 内 picture 块数大于实际处理数（`doc_asset_validator.py`）。
 
-**面试话术**：「我们不是简单 truncate 全文，而是 history 预算 + RAG Top-K + 防稀释三层压缩，保证关键规则排在 Prompt 前部。」
+**表述要点**：「我们不是简单 truncate 全文，而是 history 预算 + RAG Top-K + 防稀释三层压缩，保证关键规则排在 Prompt 前部。」
 
 ### 1.3 LLM 幻觉
 
@@ -123,7 +123,7 @@ def history_char_budget() -> int:
 
 > 将回答拆为原子断言 → 每断言与检索片段计算最高 cos_sim → 低于 0.65 标记为潜在幻觉
 
-**面试话术**：「防幻觉是 Prompt 约束 + 空检索短路 + 引用溯源 UI + 三层评测指标的组合拳，不是单靠一句 system prompt。」
+**表述要点**：「防幻觉是 Prompt 约束 + 空检索短路 + 引用溯源 UI + 三层评测指标的组合拳，不是单靠一句 system prompt。」
 
 ---
 
@@ -208,7 +208,7 @@ doc_id = f"{tenant_id}_{doc_hash(doc.page_content)}"  # MD5 内容哈希
          → citations_json 写入 chat_messages
 ```
 
-**面试话术**：「关系库存文档生命周期和引用快照，向量库只存可检索分块；两者通过 document_id 关联，删除文档时按 metadata 精确清理向量，不影响其他文档。」
+**表述要点**：「关系库存文档生命周期和引用快照，向量库只存可检索分块；两者通过 document_id 关联，删除文档时按 metadata 精确清理向量，不影响其他文档。」
 
 ---
 
@@ -266,7 +266,7 @@ doc_id = f"{tenant_id}_{doc_hash(doc.page_content)}"  # MD5 内容哈希
 | 线上反馈 | 1–5 星 + 意图纠偏 + context_snapshot | `message_feedback` 表 + FeedbackAdminPanel |
 | 文档资产校验 | 标准化 MD 与 manifest 一致性 | `test_doc_asset_validator.py` |
 
-**面试话术**：「Prompt 不是一坨字符串，而是可版本化、可审计的段式变量；每次改动都有对应评测指标和用户反馈闭环验证。」
+**表述要点**：「Prompt 不是一坨字符串，而是可版本化、可审计的段式变量；每次改动都有对应评测指标和用户反馈闭环验证。」
 
 ---
 
@@ -318,7 +318,7 @@ collection.delete(where={"$and": [{"tenant_id": tid}, {"document_id": doc_id_val
 - `tenant_id` 可为 `user_id` 或 `kb_id`（`chat.py` 中按知识库路由）。
 - 不同库的向量在同一 Chroma collection（`kb_main`）内通过 metadata 隔离。
 
-**面试话术**：「增量更新的核心是 document_id 粒度的 add/delete，加上 content-hash 去重；MySQL 是 source of truth，Chroma 是可重建的检索索引。」
+**表述要点**：「增量更新的核心是 document_id 粒度的 add/delete，加上 content-hash 去重；MySQL 是 source of truth，Chroma 是可重建的检索索引。」
 
 ---
 
@@ -406,7 +406,7 @@ chat.py
 | 日志埋点 | `agent_call_logger.log_rag_conversation(anti_dilution=...)` |
 | 对比实验 | 关闭 vs 开启 `ANTI_DILUTION_ENABLED`，对比 Groundedness 与漏规则率 |
 
-**面试话术**：「大量上下文的问题不是塞更多 token，而是先压缩成『优先规则 + 分层摘要』，再保留 Top 切片供精确引用；LLM 摘要失败有规则级 fallback。」
+**表述要点**：「大量上下文的问题不是塞更多 token，而是先压缩成『优先规则 + 分层摘要』，再保留 Top 切片供精确引用；LLM 摘要失败有规则级 fallback。」
 
 ---
 
@@ -485,7 +485,7 @@ flowchart LR
 | **Batch 3** | ❌ 串行 | 通知服务：实现事件消费 + 短信发送 | 依赖 Batch 2 的事件 |
 | **Batch 4** | ✅ 可选 | 前端：展示通知状态 | 依赖 Batch 3 的通知记录 API |
 
-### 6.4 如何接入现有 HaiChiAgent 架构
+### 6.4 如何接入现有 HaiCiAgent 架构
 
 可在 `backend/app/services/agent_pipeline.py` 后新增节点：
 
@@ -541,11 +541,11 @@ run_agent_pipeline()
 3. **并行安全率**：并行批次内服务是否 truly independent（无共享 DB 写、无接口契约未定义）。
 4. **回归门禁**：拆解结果必须引用文档切片编号，禁止无依据添加服务。
 
-**面试话术**：「任务拆解本质是『需求结构化 + 文档 RAG + 依赖图拓扑排序』；我们已有 Pipeline 节点化、防稀释、Prompt 段式管理，扩展一个 decompose 节点即可，不需要上 LangGraph。」
+**表述要点**：「任务拆解本质是『需求结构化 + 文档 RAG + 依赖图拓扑排序』；我们已有 Pipeline 节点化、防稀释、Prompt 段式管理，扩展一个 decompose 节点即可，不需要上 LangGraph。」
 
 ---
 
-## 附录：面试速记
+## 附录：技术要点速记
 
 | # | 一句话总结 |
 |---|-----------|
@@ -585,7 +585,7 @@ run_agent_pipeline()
 
 ---
 
-*本文档由项目代码与 SPEC 整理生成，供面试与技术评审使用。*
+*本文档由项目代码与 SPEC 整理生成，供架构评审与技术方案说明使用。*
 
 
 

@@ -1,7 +1,7 @@
-# SPEC · RAG 问答全链路（对话 · 意图 · 反馈 · 追问）
+﻿# SPEC · RAG 问答全链路（对话 · 意图 · 反馈 · 追问）
 
 > **模块**：AI 智能客服 · RAG 对话主链路  
-> **PRD 真源（只读，只补充不修改）**：`docs/HaiCi笔试_AI 智能客服系统_PRD.md`  
+> **产品需求文档（只读，只补充不修改）**：`docs/HaiCi笔试_AI 智能客服系统_PRD.md`  
 > **关联 SPEC**：`SPEC-AI问答Agent.md`（Pipeline 节点）、`SPEC-RAG文档标准化.md`（入库）、`SPEC-会话持久化.md`  
 > **关联实现**：`backend/app/routers/chat.py`、`rag.py`、`services/agent_pipeline.py`、`services/follow_up.py`、`services/term_dictionary.py`
 
@@ -15,13 +15,13 @@
 
 ### 分类路径
 
-`产品研发` → `SPEC·PRD` → `HaiChiAgent/RAG问答全链路` → `chat · feedback · follow_up`
+`产品研发` → `SPEC·PRD` → `HaiCiAgent/RAG问答全链路` → `chat · feedback · follow_up`
 
 | 层级 | 值 |
 |------|-----|
 | L1 领域 | 产品研发 |
 | L2 类型 | SPEC·实施规格 |
-| L3 模块 | HaiChiAgent / RAG 问答全链路 |
+| L3 模块 | HaiCiAgent / RAG 问答全链路 |
 | L4 | `chat.py` · `ChatPanel` · `ChatAssistantMessage` · `follow_up.py` |
 
 ### 版本与修订（Git 式）
@@ -120,7 +120,7 @@ sequenceDiagram
 
 问答链路 **必须在应用层** 对问题做 embedding，否则无法向量检索；EVAL 看板中 **`rag` 指标**已包含 embed + 检索整段 RTT（`embedding` 分项可选展示）。
 
-### 2.3 引用展示（对齐 web_rebuild）
+### 2.3 引用展示
 
 | 能力 | 要求 | 实现 |
 |------|------|------|

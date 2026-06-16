@@ -1,0 +1,242 @@
+{
+  "marks": [
+    {
+      "start": 717, 
+      "end": 722, 
+      "name": "Top-K", 
+      "line": 29
+    }, 
+    {
+      "start": 783, 
+      "end": 790, 
+      "name": "摘要+滑动窗口", 
+      "line": 29
+    }, 
+    {
+      "start": 2027, 
+      "end": 2033, 
+      "name": "历史字符预算", 
+      "line": 75
+    }, 
+    {
+      "start": 2362, 
+      "end": 2368, 
+      "name": "则截断更早轮", 
+      "line": 84
+    }, 
+    {
+      "start": 2395, 
+      "end": 2402, 
+      "name": "默认 50 轮", 
+      "line": 84
+    }, 
+    {
+      "start": 2529, 
+      "end": 2538, 
+      "name": "片段数 > 8 时", 
+      "line": 89
+    }, 
+    {
+      "start": 2543, 
+      "end": 2582, 
+      "name": "防稀释机制**（见第 5 题）：按文档分组、优先级排序、分层摘要后再喂 LLM", 
+      "line": 89
+    }, 
+    {
+      "start": 2604, 
+      "end": 2658, 
+      "name": "处理图片超上限时 `truncated=true`，校验器允许 MD 内 picture 块数大于实际处理数", 
+      "line": 91
+    }, 
+    {
+      "start": 2811, 
+      "end": 2817, 
+      "name": "离线评测闭环", 
+      "line": 97
+    }, 
+    {
+      "start": 3559, 
+      "end": 3593, 
+      "name": "> 将回答拆为原子断言 → 每断言与检索片段计算最高 cos_sim", 
+      "line": 124
+    }, 
+    {
+      "start": 7189, 
+      "end": 7193, 
+      "name": "优先规则", 
+      "line": 256
+    }, 
+    {
+      "start": 7824, 
+      "end": 7831, 
+      "name": "按文档粒度读写", 
+      "line": 275
+    }, 
+    {
+      "start": 8291, 
+      "end": 8313, 
+      "name": "*内容去重**，重复 chunk 不重复写入", 
+      "line": 291
+    }, 
+    {
+      "start": 8338, 
+      "end": 8347, 
+      "name": "与已有向量完全隔离", 
+      "line": 292
+    }, 
+    {
+      "start": 9140, 
+      "end": 9148, 
+      "name": "知识库文档非常多", 
+      "line": 329
+    }, 
+    {
+      "start": 9164, 
+      "end": 9182, 
+      "name": "可能有数十条甚至更多。需确保 LLM", 
+      "line": 329
+    }, 
+    {
+      "start": 9191, 
+      "end": 9198, 
+      "name": "「注意力稀释」", 
+      "line": 331
+    }, 
+    {
+      "start": 9199, 
+      "end": 9207, 
+      "name": "遗漏某条关键规则", 
+      "line": 331
+    }, 
+    {
+      "start": 9215, 
+      "end": 9224, 
+      "name": "信息过载时产生幻觉", 
+      "line": 332
+    }, 
+    {
+      "start": 9225, 
+      "end": 9240, 
+      "name": "编造不存在的规则或混淆不同规则", 
+      "line": 332
+    }, 
+    {
+      "start": 9675, 
+      "end": 9677, 
+      "name": "摘要", 
+      "line": 350
+    }, 
+    {
+      "start": 9680, 
+      "end": 9684, 
+      "name": "优先规则", 
+      "line": 350
+    }, 
+    {
+      "start": 9687, 
+      "end": 9692, 
+      "name": "Top切片", 
+      "line": 350
+    }, 
+    {
+      "start": 9706, 
+      "end": 9725, 
+      "name": "LLM 流式回答 + 防稀释引用规则]", 
+      "line": 351
+    }, 
+    {
+      "start": 10402, 
+      "end": 10406, 
+      "name": "冲突规则", 
+      "line": 378
+    }, 
+    {
+      "start": 10406, 
+      "end": 10427, 
+      "name": "，明确指出差异并建议以最新/最权威的文档为", 
+      "line": 378
+    }, 
+    {
+      "start": 10488, 
+      "end": 10498, 
+      "name": "LLM 分层摘要失败", 
+      "line": 385
+    }, 
+    {
+      "start": 10502, 
+      "end": 10525, 
+      "name": "正则提取的规则构造 fallback JSON", 
+      "line": 385
+    }, 
+    {
+      "start": 10554, 
+      "end": 10563, 
+      "name": "降级为原始排序结果", 
+      "line": 386
+    }, 
+    {
+      "start": 10564, 
+      "end": 10570, 
+      "name": "不阻塞主流程", 
+      "line": 386
+    }, 
+    {
+      "start": 11433, 
+      "end": 11440, 
+      "name": "改动多个微服务", 
+      "line": 419
+    }, 
+    {
+      "start": 11669, 
+      "end": 11686, 
+      "name": "LLM 结构化: 实体/事件/约束", 
+      "line": 430
+    }, 
+    {
+      "start": 11747, 
+      "end": 11767, 
+      "name": "RAG 检索 API 文档 / 架构文档", 
+      "line": 433
+    }, 
+    {
+      "start": 11787, 
+      "end": 11796, 
+      "name": "匹配涉及的服务清单", 
+      "line": 434
+    }, 
+    {
+      "start": 11831, 
+      "end": 11836, 
+      "name": "依赖图构建", 
+      "line": 436
+    }, 
+    {
+      "start": 11856, 
+      "end": 11870, 
+      "name": "抽取接口调用链: A→B→C", 
+      "line": 437
+    }, 
+    {
+      "start": 11890, 
+      "end": 11900, 
+      "name": "构建 DAG 依赖图", 
+      "line": 438
+    }, 
+    {
+      "start": 11990, 
+      "end": 12002, 
+      "name": "无依赖节点 → 并行批次", 
+      "line": 442
+    }, 
+    {
+      "start": 12016, 
+      "end": 12024, 
+      "name": "深度排序呗说白了", 
+      "line": 445
+    }
+  ], 
+  "file": "面试问答-RAG与Agent.md", 
+  "schema": "sublime-span-marks", 
+  "abs_path": "F:\\java\\AIOPS\\SuperBizAgent-release-2026-01-02\\demo_wendanghua\\SuperBizAgent-AgentFramework\\HaiChiAgent\\docs\\面试问答-RAG与Agent.md", 
+  "version": 2
+}
