@@ -138,9 +138,46 @@ CNSTR_SELF_INTRO_SCOPE = PromptSegment(
 
 CNSTR_JSON_ONLY = PromptSegment(
     key="CNSTR_JSON_ONLY",
-    text="只输出 JSON，不要解释。",
+    text="只输出 JSON，不要解释、不要 Markdown 代码块、不要前后缀文字。",
     desc="纯 JSON 输出约束",
     purpose="预处理/分类等结构化输出场景：防止 JSON 前后混入解释文字导致解析失败",
+)
+
+CNSTR_GREEDY_JSON = PromptSegment(
+    key="CNSTR_GREEDY_JSON",
+    text="采用确定性输出：严格按下方 JSON 模板填空，字段名不可改、不可增删键。",
+    desc="Greedy 解码配套：模板绑定",
+    purpose="配合 temperature=0 的 Greedy 解码，减少模型自由发挥导致的格式漏网",
+)
+
+FMT_PREPROC_JSON_TEMPLATE = PromptSegment(
+    key="FMT_PREPROC_JSON_TEMPLATE",
+    text=(
+        "必须严格输出以下 JSON 模板（仅替换值，保留键名）：\n"
+        '{"intent":"product_consult|after_sale|chitchat|complaint",'
+        '"rewritten_query":"完整检索问句",'
+        '"query_keywords":["关键词1","关键词2"],'
+        '"retrieval_terms":[]}'
+    ),
+    desc="查询预处理 JSON 模板",
+    purpose="模板绑定生成：比自由描述字段更不易漏键/改键",
+)
+
+FMT_FOLLOWUP_JSON_TEMPLATE = PromptSegment(
+    key="FMT_FOLLOWUP_JSON_TEMPLATE",
+    text='必须严格输出 JSON 数组，示例：["追问1不超过20字","追问2不超过20字"]',
+    desc="追问建议 JSON 模板",
+    purpose="限制输出为纯数组，便于 parse_follow_up_items 解析",
+)
+
+FMT_INTENT_SUGGEST_JSON_TEMPLATE = PromptSegment(
+    key="FMT_INTENT_SUGGEST_JSON_TEMPLATE",
+    text=(
+        '必须严格输出 JSON 数组，每项示例：'
+        '{"code":"after_sale","label":"售后问题","summary":"用户在问退换货流程"}'
+    ),
+    desc="意图纠偏 JSON 模板",
+    purpose="字段名与枚举固定，便于 Pydantic 单字段校验",
 )
 
 CNSTR_NO_FABRICATE_MENU = PromptSegment(
@@ -193,9 +230,13 @@ PREPROC_KEYWORDS_FIELD = PromptSegment(
 
 PREPROC_TERMS_FIELD = PromptSegment(
     key="PREPROC_TERMS_FIELD",
-    text="retrieval_terms 为映射后的内部业务检索词数组。",
-    desc="内部检索词字段定义",
-    purpose="要求 LLM 将用户口语映射为内部业务术语，提升专业名词检索命中率",
+    text=(
+        "retrieval_terms 为可选数组：若用户口语可能与文档常用表述不一致，"
+        "推测 1～3 个文档中可能出现的标准检索词（同义词/章节常用词）；无把握则输出 []。"
+        "禁止编造具体产品参数或政策细节。"
+    ),
+    desc="LLM 推测检索词字段（非硬编码术语表）",
+    purpose="由 Prompt 引导小模型/网关大模型做软对齐；硬编码术语表需业务树就绪后另开 TERM_MAPPING_ENABLED",
 )
 
 
@@ -509,6 +550,8 @@ def build_preprocess_prompt(history_text: str, query: str) -> str:
         PREPROC_KEYWORDS_FIELD.text,
         PREPROC_TERMS_FIELD.text,
         CNSTR_JSON_ONLY.text,
+        CNSTR_GREEDY_JSON.text,
+        FMT_PREPROC_JSON_TEMPLATE.text,
     ]
     header = "".join(segments)
     return f"{header}\n历史:\n{history_text or '无'}\n\n问题:{query}"
@@ -587,7 +630,9 @@ def build_follow_up_prompt(intent: str, question: str, answer: str) -> str:
     """组装追问建议 prompt。"""
     return (
         f"{FOLLOWUP_TASK.text}"
-        f"{CNSTR_JSON_ONLY.text}\n"
+        f"{CNSTR_JSON_ONLY.text}"
+        f"{CNSTR_GREEDY_JSON.text}"
+        f"{FMT_FOLLOWUP_JSON_TEMPLATE.text}\n"
         f"意图:{intent}\n问题:{question[:200]}\n回答:{answer[:400]}"
     )
 
@@ -604,6 +649,8 @@ def build_intent_suggest_prompt(
         f"用户提问：{question[:300]}\n"
         f"AI 回答：{answer[:400]}\n"
         f"{CNSTR_JSON_ONLY.text}"
+        f"{CNSTR_GREEDY_JSON.text}"
+        f"{FMT_INTENT_SUGGEST_JSON_TEMPLATE.text}"
     )
 
 

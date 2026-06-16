@@ -1,20 +1,18 @@
 """意图纠偏：术语表备选 + 检索词提示 + LLM 推测（真实调用）。"""
 from __future__ import annotations
 
-import json
 import logging
-import re
 
+from app.config import settings
 from app.llms import get_llm
+from app.services.structured_json import GREEDY_DECODE_PARAMS, parse_intent_suggest_items
 from app.services.term_dictionary import INTENT_LABELS, map_retrieval_terms
 
 logger = logging.getLogger(__name__)
 
-_JSON_ARR = re.compile(r"\[[\s\S]*?\]")
-
 
 def build_builtin_alternatives(detected_intent: str) -> list[dict]:
-    """P0：内部意图术语表（排除当前识别结果）。"""
+    """内置意图术语表（排除当前识别结果）。"""
     code = (detected_intent or "").strip()
     out: list[dict] = []
     for k, label in INTENT_LABELS.items():
@@ -25,11 +23,15 @@ def build_builtin_alternatives(detected_intent: str) -> list[dict]:
 
 
 def build_term_hints(question: str, retrieval_terms: list[str] | None = None) -> list[str]:
-    """P2：术语/检索词提示。"""
-    terms = list(retrieval_terms or []) or map_retrieval_terms(question)
+    """术语/检索词提示（意图纠偏侧栏，非主链路检索）。"""
+    raw_terms: list[str] = list(retrieval_terms or [])
+    if settings.TERM_MAPPING_ENABLED:
+        for t in map_retrieval_terms(question):
+            if t not in raw_terms:
+                raw_terms.append(t)
     seen: set[str] = set()
     hints: list[str] = []
-    for t in terms:
+    for t in raw_terms:
         t = str(t).strip()
         if t and t not in seen:
             seen.add(t)
@@ -43,7 +45,7 @@ def suggest_intents_llm(
     detected_intent: str,
     detected_label: str,
 ) -> list[dict]:
-    """P1：LLM 推测 1～2 个更贴切意图（映射 enum 优先）。"""
+    """大模型推测 1～2 个更贴切意图（Greedy JSON + Pydantic 校验）。"""
     q = (question or "").strip()
     a = (answer or "").strip()
     if not q or len(a) < 10:
@@ -52,25 +54,17 @@ def suggest_intents_llm(
 
     enum_text = "、".join(f"{k}={v}" for k, v in INTENT_LABELS.items())
     prompt = build_intent_suggest_prompt(q, a, detected_intent, detected_label, enum_text)
+    greedy = GREEDY_DECODE_PARAMS
     try:
-        raw = get_llm().call(prompt, temperature=0.2, max_tokens=256)
-        m = _JSON_ARR.search(raw)
-        if not m:
-            return []
-        arr = json.loads(m.group())
-        if not isinstance(arr, list):
-            return []
+        raw = get_llm().call(prompt, temperature=greedy["temperature"], max_tokens=256)
+        parsed = parse_intent_suggest_items(raw)
         out: list[dict] = []
-        for item in arr[:2]:
-            if not isinstance(item, dict):
-                continue
-            code = str(item.get("code") or "unknown").strip()
-            label = str(item.get("label") or "").strip()
-            summary = str(item.get("summary") or "").strip()
+        for item in parsed:
+            code = item.get("code", "unknown")
+            label = item.get("label") or ""
+            summary = item.get("summary") or ""
             if not label:
                 continue
-            if code not in INTENT_LABELS and code != "unknown":
-                code = "unknown"
             if code in INTENT_LABELS:
                 label = INTENT_LABELS[code]
             out.append(

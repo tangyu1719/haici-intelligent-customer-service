@@ -1005,62 +1005,10 @@ const faqCategories = computed(() => {
 const faqByCategory = (category: string): ChatFaqItem[] =>
   faqItems.value.filter((item) => item.category === category)
 
-const askFaq = async (item: ChatFaqItem): Promise<void> => {
-  if (isWaiting.value || !item?.id) return
-  isWaiting.value = true
-  speechInput.stop()
-  await ensureSession()
-  if (!sessionId.value) {
-    isWaiting.value = false
-    return
-  }
-
-  messages.value.push({
-    role: 'user',
-    content: item.question,
-    createdAt: new Date().toISOString(),
-  })
-
-  const assistant = reactive({
-    role: 'assistant',
-    content: '',
-    intent: 'faq_cached',
-    intentLabel: 'FAQ 缓存',
-    citations: [],
-    ragPrefetchSlices: [],
-    messageId: null,
-    isStreaming: true,
-  } as ChatMessage)
-  messages.value.push(assistant)
-  scrollToBottom()
-
-  try {
-    const res = await fetch('/api/v1/chat/faq-apply', {
-      method: 'POST',
-      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId.value, faq_id: item.id }),
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || 'FAQ 加载失败')
-
-    const answer = String(data.answer || '')
-    const step = 4
-    for (let i = 0; i < answer.length; i += step) {
-      assistant.content = answer.slice(0, Math.min(i + step, answer.length))
-      scrollToBottom()
-      await new Promise((resolve) => window.setTimeout(resolve, 16))
-    }
-    assistant.content = answer
-    assistant.messageId = data.assistant_message_id ?? null
-    assistant.isStreaming = false
-    await loadChatSessions()
-  } catch (e) {
-    assistant.content = (e as Error).message || 'FAQ 加载失败，请稍后重试'
-    assistant.isStreaming = false
-  } finally {
-    isWaiting.value = false
-    scrollToBottom()
-  }
+const askFaq = (item: ChatFaqItem): void => {
+  const q = (item?.question || '').trim()
+  if (!q || isWaiting.value) return
+  void sendMessage(q)
 }
 
 const regenerateReply = (userQuestion: string): void => {

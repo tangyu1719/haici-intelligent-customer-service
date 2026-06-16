@@ -29,4 +29,4 @@ Get-Content schema_full_v1.sql | mysql -h127.0.0.1 -P3306 -uroot -p
 | migrate_*.sql | 历史增量脚本（供查阅/手工执行） |
 | seed_kb/ | 样例 Markdown 知识库 |
 
-详细设计见 `docs/数据库设计.md`。
+详细设计见 `docxl/数据库设计.md`。

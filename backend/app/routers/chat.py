@@ -423,6 +423,7 @@ async def _produce_chat_stream(
             and not pipeline.faq_answer
             and is_complex_query(enriched_question or question)
         )
+        # 无论是否 ReAct，回答均经同一 SSE 通道推送（status/token/citations/done 等）
         route_decision = None
         if pipeline.intent != "chitchat" and not pipeline.faq_answer and use_react:
             from app.services.kb_router import select_kb_route

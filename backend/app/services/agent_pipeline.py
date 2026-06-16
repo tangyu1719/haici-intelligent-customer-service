@@ -1,19 +1,31 @@
-"""AI 问答固定节点 Pipeline（无 LangGraph，轻量串行）。"""
+"""AI 问答固定节点 Pipeline（无 LangGraph，轻量串行）。
+
+主链路（默认）：
+  意图识别（规则 + 小模型/网关大模型 Greedy JSON）
+  → 问句改写 + 关键词
+  → 组装 rag_query（不含硬编码术语表）
+
+术语表映射（term_dictionary）默认关闭，需 TERM_MAPPING_ENABLED=true 且业务树形分层就绪后启用。
+"""
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from dataclasses import dataclass, field
 
+from app.config import settings
 from app.intent import IntentType, get_recognizer, has_business_or_technical_signal
 from app.llms import get_llm
+from app.services.structured_json import (
+    GREEDY_DECODE_PARAMS,
+    build_repair_prompt,
+    openai_json_response_format,
+    parse_preprocess_output,
+)
 from app.services.term_dictionary import INTENT_LABELS, map_retrieval_terms
 
 logger = logging.getLogger(__name__)
-
-_JSON_RE = re.compile(r"\{[\s\S]*\}")
 
 
 @dataclass
@@ -26,7 +38,7 @@ class PipelineResult:
     retrieval_terms: list[str] = field(default_factory=list)
     rag_query: str = ""
     faq_answer: str = ""
-    pipeline_source: str = "rule"  # rule | llm
+    pipeline_source: str = "rule"  # rule | llm | llm_gateway
 
 
 def _coerce_intent(intent: str, query: str, fallback: str) -> str:
@@ -63,83 +75,201 @@ def _rule_rewrite(query: str, history: list[dict]) -> str:
     return q
 
 
-def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
-    from app.llms import get_pipeline_llm
+def _resolve_retrieval_terms(
+    query: str,
+    keywords: list[str],
+    llm_terms: list[str] | None,
+) -> list[str]:
+    """检索词：默认仅采纳 LLM JSON 的 retrieval_terms；硬编码术语表需显式开启。"""
+    terms: list[str] = []
+    for t in llm_terms or []:
+        t = str(t).strip()
+        if t and t not in terms:
+            terms.append(t)
+    if settings.TERM_MAPPING_ENABLED:
+        for t in map_retrieval_terms(query, keywords):
+            if t not in terms:
+                terms.append(t)
+    return terms[:12]
 
-    # 仅走本地 Ollama 快速预处理（3s 超时）；失败则规则链路，避免网关 LLM 阻塞首包（>40s）
-    pipeline_node = get_pipeline_llm()
-    if pipeline_node:
-        try:
-            result = _call_llm_with_node(pipeline_node, query, history, timeout=3.0)
-            if result:
-                return result
-        except Exception:
-            logger.warning("[AI问答-Pipeline|Ollama|超时/失败|降级至规则]")
-    return None
+
+def _build_rag_query(rewritten: str, keywords: list[str], terms: list[str]) -> str:
+    parts = [rewritten.strip()]
+    parts.extend(keywords)
+    if settings.TERM_MAPPING_ENABLED or terms:
+        parts.extend(terms)
+    merged = " ".join(dict.fromkeys(p for p in parts if p))
+    return merged or rewritten.strip()
+
+
+def _parse_preprocess_raw(raw: str) -> dict | None:
+    return parse_preprocess_output(raw)
 
 
 def _call_llm_with_node(node, query: str, history: list[dict], timeout: float = 10.0) -> dict | None:
-    """用指定网关节点调用 LLM（短超时，失败自动降级）"""
+    """指定节点 Greedy JSON 预处理（小模型优先路径）。"""
     import httpx
 
     from app.llms import _openai_chat_url
+    from app.services.prompt_segments import build_preprocess_prompt
 
     hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
-    from app.services.prompt_segments import build_preprocess_prompt
     prompt = build_preprocess_prompt(hist, query)
     url = _openai_chat_url(node.base_url)
-    payload = {
+    greedy = GREEDY_DECODE_PARAMS
+    base_payload: dict = {
         "model": node.model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
-        "temperature": 0.1,
+        "temperature": greedy["temperature"],
+        "top_p": greedy["top_p"],
         "max_tokens": 256,
     }
+
+    def _post(messages: list[dict], *, with_json_mode: bool) -> httpx.Response:
+        payload = dict(base_payload)
+        payload["messages"] = messages
+        if with_json_mode:
+            payload["response_format"] = openai_json_response_format()
+        return httpx.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {node.api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout,
+        )
+
     try:
-        resp = httpx.post(url, json=payload, headers={
-            "Authorization": f"Bearer {node.api_key}",
-            "Content-Type": "application/json",
-        }, timeout=timeout)
-        if resp.status_code == 200:
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            m = _JSON_RE.search(content)
-            if m:
-                result = json.loads(m.group())
-                if isinstance(result, dict) and result.get("rewritten_query"):
-                    node_name = getattr(node, 'name', 'ollama')
-                    logger.info("[AI问答-Pipeline|%s|快速预处理] ok", node_name)
-                    return result
+        resp = _post([{"role": "user", "content": prompt}], with_json_mode=True)
+        if resp.status_code >= 400:
+            resp = _post([{"role": "user", "content": prompt}], with_json_mode=False)
+        if resp.status_code != 200:
+            return None
+        content = resp.json()["choices"][0]["message"]["content"]
+        result = _parse_preprocess_raw(content)
+        if result:
+            node_name = getattr(node, "name", "ollama")
+            logger.info("[AI问答-Pipeline|%s|Greedy JSON 预处理|硬编执行|完成] ok", node_name)
+            return result
+        repair_prompt = build_repair_prompt(prompt, content)
+        resp2 = _post([{"role": "user", "content": repair_prompt}], with_json_mode=True)
+        if resp2.status_code >= 400:
+            resp2 = _post([{"role": "user", "content": repair_prompt}], with_json_mode=False)
+        if resp2.status_code == 200:
+            content2 = resp2.json()["choices"][0]["message"]["content"]
+            result2 = _parse_preprocess_raw(content2)
+            if result2:
+                logger.info("[AI问答-Pipeline|本地LLM|Greedy JSON 修复重试|硬编执行|完成] ok")
+                return result2
     except Exception as exc:
         logger.warning("[AI问答-Pipeline|本地LLM|降级] err=%s", str(exc)[:120])
     return None
 
 
-def _call_llm_default(query: str, history: list[dict]) -> dict | None:
-    """通过主网关调用 LLM"""
-    llm = get_llm()
-    hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
+def _call_llm_gateway_preprocess(query: str, history: list[dict]) -> dict | None:
+    """网关大模型 Greedy JSON 预处理（小模型失败后的第二级）。"""
     from app.services.prompt_segments import build_preprocess_prompt
+
+    hist = "\n".join([f"{h['role']}:{h['content'][:120]}" for h in history[-6:]])
     prompt = build_preprocess_prompt(hist, query)
+    greedy = GREEDY_DECODE_PARAMS
     try:
-        raw = llm.call(prompt, temperature=0.1, max_tokens=512)
-        m = _JSON_RE.search(raw)
-        if not m:
-            return None
-        data = json.loads(m.group())
-        if isinstance(data, dict) and data.get("rewritten_query"):
-            return data
+        raw = get_llm().call(
+            prompt,
+            temperature=greedy["temperature"],
+            max_tokens=512,
+            task_type="qa",
+        )
+        result = _parse_preprocess_raw(raw)
+        if result:
+            logger.info("[AI问答-Pipeline|网关LLM|Greedy JSON 预处理|Agent执行|完成] ok")
+            return result
+        repair_prompt = build_repair_prompt(prompt, raw)
+        raw2 = get_llm().call(
+            repair_prompt,
+            temperature=greedy["temperature"],
+            max_tokens=512,
+            task_type="qa",
+        )
+        result2 = _parse_preprocess_raw(raw2)
+        if result2:
+            logger.info("[AI问答-Pipeline|网关LLM|Greedy JSON 修复重试|Agent执行|完成] ok")
+        return result2
     except Exception as exc:
-        logger.warning("[AI问答-Pipeline|agent_pipeline|LLM预处理|Agent执行|降级] err=%s", str(exc)[:120])
+        logger.warning(
+            "[AI问答-Pipeline|网关LLM|预处理|Agent执行|降级] err=%s",
+            str(exc)[:120],
+        )
     return None
 
 
+def _llm_preprocess(query: str, history: list[dict]) -> tuple[dict | None, str]:
+    """三级预处理：Ollama 小模型 → 网关大模型 → 规则（返回 data, source 标签）。"""
+    from app.llms import get_pipeline_llm
+
+    pipeline_node = get_pipeline_llm()
+    if pipeline_node:
+        try:
+            result = _call_llm_with_node(pipeline_node, query, history, timeout=3.0)
+            if result:
+                return result, "llm"
+        except Exception:
+            logger.warning("[AI问答-Pipeline|Ollama|超时/失败|降级至网关或规则]")
+
+    if settings.PIPELINE_GATEWAY_LLM_FALLBACK:
+        result = _call_llm_gateway_preprocess(query, history)
+        if result:
+            return result, "llm_gateway"
+
+    return None, "rule"
+
+
+def _pipeline_result_from_llm(
+    q: str,
+    llm_data: dict,
+    rule_intent_value: str,
+    *,
+    source: str,
+) -> PipelineResult:
+    intent = _coerce_intent(
+        str(llm_data.get("intent") or rule_intent_value),
+        q,
+        rule_intent_value,
+    )
+    if intent == "chitchat":
+        return PipelineResult(
+            original_query=q,
+            intent=intent,
+            intent_label=INTENT_LABELS.get(intent, intent),
+            rewritten_query=q,
+            pipeline_source=source,
+        )
+    rewritten = str(llm_data.get("rewritten_query") or q).strip()
+    keywords = [str(x) for x in (llm_data.get("query_keywords") or []) if x][:8]
+    if not keywords:
+        keywords = _extract_keywords(q)
+    llm_terms = [str(x) for x in (llm_data.get("retrieval_terms") or []) if x]
+    terms = _resolve_retrieval_terms(q, keywords, llm_terms)
+    rag_query = _build_rag_query(rewritten, keywords, terms)
+    return PipelineResult(
+        original_query=q,
+        intent=intent,
+        intent_label=INTENT_LABELS.get(intent, intent),
+        rewritten_query=rewritten,
+        query_keywords=keywords,
+        retrieval_terms=terms,
+        rag_query=rag_query,
+        pipeline_source=source,
+    )
+
+
 def run_agent_pipeline(query: str, history: list[dict] | None = None) -> PipelineResult:
-    """固定节点：意图识别 → Query 改写 → 关键词提取 → 术语映射 → 组装 RAG 检索词。"""
+    """固定节点：意图识别 → 问句改写/关键词（Greedy JSON）→ 组装 rag_query。"""
     history = history or []
     q = query.strip()
 
-    # 节点1：意图识别（规则优先，FAQ 直出）
     rule_intent = get_recognizer().recognize(q)
     if rule_intent.faq_answer:
         return PipelineResult(
@@ -151,7 +281,6 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
             pipeline_source="rule",
         )
 
-    # 闲聊不走 LLM 预处理，避免多轮简单对话卡在「正在理解...」（须无业务/技术信号）
     if rule_intent.intent == IntentType.CHITCHAT and not has_business_or_technical_signal(q):
         return PipelineResult(
             original_query=q,
@@ -161,45 +290,14 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
             pipeline_source="rule",
         )
 
-    llm_data = _llm_preprocess(q, history)
+    llm_data, llm_source = _llm_preprocess(q, history)
     if llm_data:
-        intent = _coerce_intent(
-            str(llm_data.get("intent") or rule_intent.intent.value),
-            q,
-            rule_intent.intent.value,
-        )
-        if intent == "chitchat":
-            return PipelineResult(
-                original_query=q,
-                intent=intent,
-                intent_label=INTENT_LABELS.get(intent, intent),
-                rewritten_query=q,
-                pipeline_source="llm",
-            )
-        rewritten = str(llm_data.get("rewritten_query") or q).strip()
-        keywords = [str(x) for x in (llm_data.get("query_keywords") or []) if x][:8]
-        terms = [str(x) for x in (llm_data.get("retrieval_terms") or []) if x][:12]
-        if not keywords:
-            keywords = _extract_keywords(q)
-        if not terms:
-            terms = map_retrieval_terms(q, keywords)
-        rag_query = " ".join(dict.fromkeys([rewritten, *keywords, *terms]))
-        return PipelineResult(
-            original_query=q,
-            intent=intent,
-            intent_label=INTENT_LABELS.get(intent, intent),
-            rewritten_query=rewritten,
-            query_keywords=keywords,
-            retrieval_terms=terms,
-            rag_query=rag_query,
-            pipeline_source="llm",
-        )
+        return _pipeline_result_from_llm(q, llm_data, rule_intent.intent.value, source=llm_source)
 
-    # 规则降级链路
     rewritten = _rule_rewrite(q, history)
     keywords = _extract_keywords(q)
-    terms = map_retrieval_terms(q, keywords)
-    rag_query = " ".join(dict.fromkeys([rewritten, *keywords, *terms]))
+    terms = _resolve_retrieval_terms(q, keywords, None)
+    rag_query = _build_rag_query(rewritten, keywords, terms)
     intent = _coerce_intent(rule_intent.intent.value, q, "product_consult")
 
     return PipelineResult(

@@ -2,7 +2,9 @@
 
 Base URL: `http://127.0.0.1:8000`
 
-## 认证
+> RAG 链路与 SSE 事件语义见 [项目说明.md](../项目说明.md) 章节 2、[AI架构设计.md](./AI架构设计.md)。
+
+## 1 认证
 
 - `POST /api/v1/auth/register` 注册（邮箱或手机号 + 密码）
 - `POST /api/v1/auth/send-code` 发送短信/邮箱验证码
@@ -13,7 +15,7 @@ Base URL: `http://127.0.0.1:8000`
 - `GET /api/v1/auth/menus` 当前用户菜单树
 - `PATCH /api/v1/auth/profile` 更新个人资料
 
-## 会话
+## 2 会话
 
 - `POST /api/v1/sessions` 创建新会话
 - `GET /api/v1/sessions` 会话列表（分页、排序、搜索）
@@ -22,7 +24,7 @@ Base URL: `http://127.0.0.1:8000`
 - `PATCH /api/v1/sessions/{id}` 更新标题/备注/置顶
 - `DELETE /api/v1/sessions/{id}` 归档（软删除）
 
-## 知识库管理
+## 3 知识库管理
 
 - `GET /api/v1/knowledge` 文档列表（支持 kb_id 筛选、状态筛选）
 - `POST /api/v1/knowledge/upload` 上传文档（支持 kb_id 参数关联知识库）
@@ -34,7 +36,7 @@ Base URL: `http://127.0.0.1:8000`
 - `GET /api/v1/knowledge/slice-methods` 支持的分块策略列表
 - `POST /api/v1/knowledge/chunk-preview` 分块预览
 
-## 多知识库路由 (新增)
+## 4 多知识库路由
 
 - `GET /api/v1/knowledge-bases` 知识库分页列表
 - `GET /api/v1/knowledge-bases/all` 所有知识库简要列表（下拉用）
@@ -44,7 +46,7 @@ Base URL: `http://127.0.0.1:8000`
 - `DELETE /api/v1/knowledge-bases/{id}` 删除知识库（仅解除关联，不删文档）
 - `POST /api/v1/knowledge-bases/auto-route?question=` 自动路由到最相关知识库
 
-## 流式问答（SSE）
+## 5 流式问答（SSE）
 
 `POST /api/v1/chat/stream`
 
@@ -95,29 +97,29 @@ SSE 事件流：
 
 - `GET /api/v1/feedback/my` 个人反馈历史
 
-## 管理后台
+## 7 管理后台
 
-### 反馈管理
+### 7.1 反馈管理
 - `GET /api/v1/admin/feedback` 反馈列表（管理视图，支持筛选）
 - `GET /api/v1/admin/feedback/{id}` 反馈详情
 - `GET /api/v1/admin/feedback/analytics` 反馈分析统计
 - `GET /api/v1/admin/feedback/ai-analysis` AI 分析报告
 
-### EVAL 评测
+### 7.2 EVAL 评测
 - `GET /api/v1/admin/eval/overview` EVAL 评测概览
 
-### 运维日志
+### 7.3 运维日志
 - `GET /api/v1/admin/logs/operation` 操作日志
 - `GET /api/v1/admin/logs/error` 异常日志
 - `GET /api/v1/admin/logs/api-call` API 调用日志
 - `GET /api/v1/admin/logs/schedule` 定时任务日志
 
-## 系统
+## 8 系统
 
 - `GET /api/v1/system/platform/health` 平台健康检查（MySQL/Chroma/Embedding/LLM网关）
 - `GET /api/v1/system/llm-gateway` LLM 网关快照
 
-## 多模态
+## 9 多模态
 
 - `POST /api/v1/multimodal/upload` 上传文件（图片/文档）
 - `POST /api/v1/multimodal/text` 粘贴文本处理
@@ -127,7 +129,7 @@ SSE 事件流：
 - `GET /api/v1/multimodal/output-path` Output 目录信息
 - `GET /api/v1/multimodal/browse` Output 目录浏览
 
-## Agent 配置
+## 10 Agent 配置
 
 - `GET /api/v1/agent-settings/catalog` Agent 目录
 - `GET /api/v1/agent-settings/prompt/{agent_id}` Agent Prompt

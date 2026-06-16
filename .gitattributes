@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.md text utf-8
+*.py text utf-8
+*.vue text utf-8
+*.json text utf-8
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.docx binary

@@ -6,8 +6,8 @@
 
 - **后端**：FastAPI + MySQL + ChromaDB
 - **前端**：Vue 3 + TypeScript + Vite
-- **LLM**：OpenAI 兼容 API（通义千问 / Ollama 等）
-- **Embedding**：BAAI/bge-small-zh-v1.5（CPU）
+- **LLM**：DeepSeek-V4-flash（火山方舟 ARK，OpenAI 兼容网关）
+- **Embedding**：BAAI/bge-large-zh-v1.5（本地快照缓存）
 
 ## 目录结构
 
@@ -21,11 +21,12 @@
 │   ├── src/
 │   ├── package.json
 │   └── README.md               # 前端启动说明
-├── docs/                       # 设计文档
+├── docxl/                      # 提交文档（核心四件套）
 │   ├── API文档.md
 │   ├── 数据库设计.md
 │   ├── AI架构设计.md
 │   └── 业务流程说明.md
+├── dev-process-docs/           # 开发过程文档（SPEC / PRD / 回归报告等）
 ├── 项目说明.md
 ├── 运行指南.md
 ├── docker-compose.yml
@@ -40,7 +41,7 @@ docker compose up -d
 
 # 2. 配置
 cp .env.example .env
-# 填写 LLM_API_KEY
+# 填写 ARK_API_KEY、LLM_MODEL_QA（DeepSeek-V4-flash）
 
 # 3. 后端
 cd backend && pip install -r requirements.txt
@@ -57,9 +58,12 @@ cd frontend && npm run build
 
 ## 文档索引
 
-- [项目说明](./项目说明.md)
-- [运行指南](./运行指南.md)
-- [API 文档](./docs/API文档.md)
-- [数据库设计](./docs/数据库设计.md)
-- [AI 架构设计](./docs/AI架构设计.md)
-- [业务流程说明](./docs/业务流程说明.md)
+| 文档 | 说明 |
+|------|------|
+| [项目说明](./项目说明.md) | 章节 1 技术选型 · 章节 2 RAG 架构与评估 · 章节 3 业务思考 · 章节 4 AI 工具认知 |
+| [运行指南](./运行指南.md) | 部署启动 |
+| [API 文档](./docxl/API文档.md) | 接口 + SSE（章节 1–章节 10） |
+| [数据库设计](./docxl/数据库设计.md) | ER + 表结构 |
+| [AI 架构设计](./docxl/AI架构设计.md) | RAG 流程 + 章节 9 工程问题 |
+| [业务流程说明](./docxl/业务流程说明.md) | 时序图 |
+| [项目交付总览](./dev-process-docs/项目交付总览.md) | 交付清单与验收索引 |

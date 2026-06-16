@@ -1,7 +1,7 @@
 ﻿# SPEC · RAG 问答全链路（对话 · 意图 · 反馈 · 追问）
 
 > **模块**：AI 智能客服 · RAG 对话主链路  
-> **产品需求文档（只读，只补充不修改）**：`docs/HaiCi笔试_AI 智能客服系统_PRD.md`  
+> **产品需求文档（只读，只补充不修改）**：`dev-process-docs/HaiCi笔试_AI 智能客服系统_PRD.md`  
 > **关联 SPEC**：`SPEC-AI问答Agent.md`（Pipeline 节点）、`SPEC-RAG文档标准化.md`（入库）、`SPEC-会话持久化.md`  
 > **关联实现**：`backend/app/routers/chat.py`、`rag.py`、`services/agent_pipeline.py`、`services/follow_up.py`、`services/term_dictionary.py`
 
@@ -61,19 +61,19 @@
 
 | PRD 章节 | 要求摘要 | 本 SPEC 章节 | 实现状态 |
 |----------|----------|--------------|----------|
-| §2 知识库 | txt/md/pdf 解析向量化、列表、删除同步向量 | 见 `SPEC-RAG文档标准化.md` | ✅ 主链路已有 |
-| §2 智能问答 | 检索 → Prompt → LLM → **SSE 流式** | §2 | ✅ |
-| §2 智能问答 | 展示引用来源（文档名 + 片段） | §2.3 | ✅ citations + 文献切片 UI |
-| §2 智能问答 | 多轮对话最近 N 轮 | §2.4 | ✅ `CHAT_HISTORY_TURNS` |
-| §2 业务规则 | 500 字上限、空检索兜底、日限额 100 | §2.5 | ✅ |
-| §3 加分 · 意图识别 | 分类并标注会话记录 | §3 | ✅ 规则 + LLM 预处理 |
-| §3 加分 · **追问引导** | 回答后 **2～3 条**可点击追问 | §4 | ✅ 前后端 SSE + chip |
-| §3 加分 · 管理后台 | 会话、反馈统计 | §6 + 反馈看板 SPEC | ✅ 运维评测模块 |
-| §3 加分 · 多知识库路由 | 自动选库 | §2.6 | 🔲 未做 |
-| 评估 · 幻觉/空检索 | Prompt 约束 + 兜底 | §2.5 | ✅ |
-| 评估 · 大规模上下文 | 防注意力稀释 | §2.7 | ⚠️ 初版 Top-K + 截断 |
-| **产品增补** | **意图理解有误 → 备选意图引导** | §5.3 | ✅ |
-| **产品增补** | 满意度 1～5 星 + 补充说明 | §5.2 | ✅ |
+| 章节 2 知识库 | txt/md/pdf 解析向量化、列表、删除同步向量 | 见 `SPEC-RAG文档标准化.md` | ✅ 主链路已有 |
+| 章节 2 智能问答 | 检索 → Prompt → LLM → **SSE 流式** | 章节 2 | ✅ |
+| 章节 2 智能问答 | 展示引用来源（文档名 + 片段） | 章节 2.3 | ✅ citations + 文献切片 UI |
+| 章节 2 智能问答 | 多轮对话最近 N 轮 | 章节 2.4 | ✅ `CHAT_HISTORY_TURNS` |
+| 章节 2 业务规则 | 500 字上限、空检索兜底、日限额 100 | 章节 2.5 | ✅ |
+| 章节 3 加分 · 意图识别 | 分类并标注会话记录 | 章节 3 | ✅ 规则 + LLM 预处理 |
+| 章节 3 加分 · **追问引导** | 回答后 **2～3 条**可点击追问 | 章节 4 | ✅ 前后端 SSE + chip |
+| 章节 3 加分 · 管理后台 | 会话、反馈统计 | 章节 6 + 反馈看板 SPEC | ✅ 运维评测模块 |
+| 章节 3 加分 · 多知识库路由 | 自动选库 | 章节 2.6 | 🔲 未做 |
+| 评估 · 幻觉/空检索 | Prompt 约束 + 兜底 | 章节 2.5 | ✅ |
+| 评估 · 大规模上下文 | 防注意力稀释 | 章节 2.7 | ⚠️ 初版 Top-K + 截断 |
+| **产品增补** | **意图理解有误 → 备选意图引导** | 章节 5.3 | ✅ |
+| **产品增补** | 满意度 1～5 星 + 补充说明 | 章节 5.2 | ✅ |
 
 ---
 
@@ -146,13 +146,13 @@ sequenceDiagram
 ### 2.6 多知识库路由（PRD 加分 · 未做）
 
 - 现状：Chroma `tenant_id` 默认 `str(user_id)`，单 collection `kb_main`。
-- 目标：多 collection / 路由模型，按意图或 Query 选库（**本期 SPEC 仅占位，见 §11 Q3**）。
+- 目标：多 collection / 路由模型，按意图或 Query 选库（**本期 SPEC 仅占位，见 章节 11 Q3**）。
 
 ### 2.7 大规模上下文防稀释（PRD 加分 · 初版）
 
 | 策略 | 现状 | 目标增强 |
 |------|------|----------|
-| Top-K + 阈值 | `RAG_TOP_K=4`, `RAG_SCORE_THRESHOLD=0.35` | Owner 调参 |
+| Top-K + 阈值 | `RAG_TOP_K=3`, `RAG_SCORE_THRESHOLD=0.65`, `RAG_HIGH_SCORE_THRESHOLD=0.65` | Owner 调参 |
 | 多 query 合并 | `retrieve_merged` 拆词多路检索 | ✅ |
 | 片段截断 | `build_rag_llm_blocks` 预算 | ✅ |
 | 规则优先级 / 分层摘要 | 未做 | PLAN Phase 3 可选 |
@@ -161,7 +161,7 @@ sequenceDiagram
 
 ## 3. 意图识别与 Pipeline
 
-固定节点串行（**禁止 LangGraph 假步骤**），详见 `SPEC-AI问答Agent.md` §3。
+固定节点串行（**禁止 LangGraph 假步骤**），详见 `SPEC-AI问答Agent.md` 章节 3。
 
 ```text
 [1] 意图识别   intent.py + LLM JSON 预处理
@@ -171,7 +171,7 @@ sequenceDiagram
 [5] RAG 检索   safe_retrieve_merged(rag_query)
 [6] Prompt     build_prompt_messages + 引用指令
 [7] LLM 流式  stream_chat（真实调用）
-[8] 追问       generate_follow_ups（真实 LLM，见 §4）
+[8] 追问       generate_follow_ups（真实 LLM，见 章节 4）
 ```
 
 **意图枚举（内部 code → 中文）** — `term_dictionary.INTENT_LABELS`：
@@ -301,7 +301,7 @@ RAG 主链路调用纳入 **EVAL 评测**（运维评测 → EVAL 评测）：
 - 对话 trace：`chat/stream` 设置 `set_agent_trace` + SSE `eval_trace_id`
 - 回归：`backend/scripts/regression_eval_monitor.py`
 
-**说明**：问答场景 embedding 为检索必需步骤，与入库 embedding 区分展示，见 §2.2。
+**说明**：问答场景 embedding 为检索必需步骤，与入库 embedding 区分展示，见 章节 2.2。
 
 ---
 
@@ -334,18 +334,18 @@ RAG 主链路调用纳入 **EVAL 评测**（运维评测 → EVAL 评测）：
 
 | 能力 | 后端 | 前端 | 文档 |
 |------|------|------|------|
-| RAG 检索 + 流式 | ✅ `chat.py` | ✅ | §2 |
-| 文献切片 + MD | ✅ | ✅ | §2.3 |
-| Pipeline 五节点 | ✅ `agent_pipeline.py` | meta 展示 | §3 |
-| 术语映射 | ✅ `term_dictionary.py` | — | §3 |
-| 追问 LLM + 前端 chip | ✅ | ✅ | §4 |
-| 意图 👍/👎 + 纠偏面板 | ✅ | ✅ | §5 |
-| 意图纠偏 API + LLM 推测 | ✅ `intent_suggest.py` | ✅ | §5.3 |
-| 星级 + 补充说明 | ✅ | ✅ | §5 |
-| 管理反馈看板 | ✅ | ✅ | §6 |
-| EVAL rag/llm | ✅ | ✅ EvalDashboard | §6 |
-| 多库路由 | ❌ | — | §2.6 |
-| 回归脚本 | ✅ `regression_eval_monitor.py` | — | §6 |
+| RAG 检索 + 流式 | ✅ `chat.py` | ✅ | 章节 2 |
+| 文献切片 + MD | ✅ | ✅ | 章节 2.3 |
+| Pipeline 五节点 | ✅ `agent_pipeline.py` | meta 展示 | 章节 3 |
+| 术语映射 | ✅ `term_dictionary.py` | — | 章节 3 |
+| 追问 LLM + 前端 chip | ✅ | ✅ | 章节 4 |
+| 意图 👍/👎 + 纠偏面板 | ✅ | ✅ | 章节 5 |
+| 意图纠偏 API + LLM 推测 | ✅ `intent_suggest.py` | ✅ | 章节 5.3 |
+| 星级 + 补充说明 | ✅ | ✅ | 章节 5 |
+| 管理反馈看板 | ✅ | ✅ | 章节 6 |
+| EVAL rag/llm | ✅ | ✅ EvalDashboard | 章节 6 |
+| 多库路由 | ❌ | — | 章节 2.6 |
+| 回归脚本 | ✅ `regression_eval_monitor.py` | — | 章节 6 |
 
 ---
 
@@ -392,13 +392,13 @@ RAG 主链路调用纳入 **EVAL 评测**（运维评测 → EVAL 评测）：
 
 ## 待二次审阅（由 Owner 回填）
 
-- [ ] 确认 §5.3 意图纠偏四档优先级是否符合产品预期
-- [ ] 确认追问 chip **点击即发送** vs **填入输入框**（见 §11 Q2）
+- [ ] 确认 章节 5.3 意图纠偏四档优先级是否符合产品预期
+- [ ] 确认追问 chip **点击即发送** vs **填入输入框**（见 章节 11 Q2）
 - [ ] `RAG_TOP_K` / `RAG_SCORE_THRESHOLD` 目标值：________
 - [ ] 意图术语表是否扩展为外部词库文件（路径）：________
 - [ ] P0/P1 排期：`P0 追问前端` ___ 人日；`P1 意图纠偏` ___ 人日
 - [ ] 接口冻结责任人：________
-- [ ] 见 §11 Q1～Q4，请 Owner 逐条裁决
+- [ ] 见 章节 11 Q1～Q4，请 Owner 逐条裁决
 
 ---
 

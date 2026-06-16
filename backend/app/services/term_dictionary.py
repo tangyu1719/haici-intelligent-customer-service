@@ -1,4 +1,9 @@
-﻿"""内部业务术语映射（轻量版）。"""
+﻿"""内部业务术语映射（轻量版 · 可选模块）。
+
+默认不在主链路启用（TERM_MAPPING_ENABLED=false）。
+完整术语体系需结合企业业务架构：分层 → 模块化 → 树形粒度，再导入映射表或对接术语服务。
+主链路口语对齐优先由预处理 Prompt 的 retrieval_terms 字段（LLM 推测）完成。
+"""
 
 from __future__ import annotations
 

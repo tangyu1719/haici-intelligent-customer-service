@@ -7,9 +7,9 @@
 
 ---
 
-## 一、必做功能（PRD §功能需求）
+## 1 必做功能（PRD 功能需求）
 
-### 1. 用户与会话模块
+### 1.1 用户与会话模块
 
 | # | PRD 要求 | 实现状态 | 代码/接口 | 验证 |
 |---|----------|----------|-----------|------|
@@ -18,7 +18,7 @@
 | 1.3 | 历史会话列表与会话详情（含完整对话） | ✅ 已实现 | `GET /api/v1/sessions`、`/sessions/{id}/messages` | `test_regression_sessions.py` |
 | 1.4 | 对 AI 回答反馈（赞/踩 + 可选文字） | ✅ 已实现 | `POST /api/v1/feedback/messages/{id}` | `test_regression_feedback.py` |
 
-### 2. 核心 AI 对话模块 · 知识库管理
+### 1.2 核心 AI 对话模块 · 知识库管理
 
 | # | PRD 要求 | 实现状态 | 代码/接口 | 验证 |
 |---|----------|----------|-----------|------|
@@ -26,7 +26,7 @@
 | 2.2 | 知识库列表（名称、上传时间、处理中/就绪/失败） | ✅ 已实现 | `GET /api/v1/knowledge` | `test_regression_knowledge_base.py` |
 | 2.3 | 删除文档并同步清除向量 | ✅ 已实现 | `DELETE /api/v1/knowledge/{id}` | `test_regression_knowledge.py` |
 
-### 3. 核心 AI 对话模块 · 智能问答（RAG）
+### 1.3 核心 AI 对话模块 · 智能问答（RAG）
 
 | # | PRD 要求 | 实现状态 | 代码/接口 | 验证 |
 |---|----------|----------|-----------|------|
@@ -34,7 +34,7 @@
 | 3.2 | 展示引用来源（文档名 + 片段摘要） | ✅ 已实现 | SSE `event:citations`；`ChatAssistantMessage.vue` | `test_regression_chat.py` |
 | 3.3 | 多轮对话（携带最近 N 轮历史） | ✅ 已实现 | `session_context_manager.py`、`chat_context.py` | `test_chat_context_manager.py` |
 
-### 4. 业务规则
+### 1.4 业务规则
 
 | # | PRD 要求 | 实现状态 | 配置/代码 | 验证 |
 |---|----------|----------|-----------|------|
@@ -45,7 +45,7 @@
 
 ---
 
-## 二、加分项（PRD §可选扩展 / §加分项）
+## 2 加分项（PRD 可选扩展 / 加分项）
 
 | # | PRD 加分项 | 实现状态 | 设计要点 | 验证 |
 |---|------------|----------|----------|------|
@@ -55,13 +55,13 @@
 | B4 | 多知识库路由 | ✅ 已实现 | `knowledge_bases` 表 + `auto-route` API | `test_regression_knowledge_base.py` |
 | B5 | 大规模检索防注意力稀释 | ✅ 已实现 | `context_anti_dilution.py` + `rag_gradient_filter.py` | `test_regression_anti_dilution.py` |
 | B6 | 流式输出体验流畅 | ✅ 已实现 | 真 LLM token 流 + 前端 ReadableStream | 人工 + SSE 回归 |
-| B7 | Prompt 优化减幻觉 | ✅ 已实现 | `prompt_segments.py` 硬约束 + 引用溯源 UI | 见 [面试问答-RAG与Agent.md](./面试问答-RAG与Agent.md) §3 |
+| B7 | Prompt 优化减幻觉 | ✅ 已实现 | 问句工程 + `prompt_segments.py` 硬约束 + 引用溯源 + 忠实度评测 | 见 [项目说明.md](../项目说明.md) 章节 3.1.3、[AI架构设计.md](../docxl/AI架构设计.md) 章节 9 |
 | B8 | 知识库增量更新 | ✅ 已实现 | 按 `document_id` upsert/delete，删文档不影响其他向量 | `test_regression_knowledge.py` |
-| — | **终极挑战：微服务 Agent 拆解** | ⏭ 不在范围 | 设计思路见面试文档 §6，未要求实现 | — |
+| — | **终极挑战：微服务 Agent 拆解** | ⏭ 不在范围 | 设计思路见面试文档 章节 6，未要求实现 | — |
 
 ---
 
-## 三、技术要求对照（PRD §技术栈 / §技术要求）
+## 3 技术要求对照（PRD 技术栈 / 技术要求）
 
 | # | 要求 | 状态 | 说明 |
 |---|------|------|------|
@@ -69,32 +69,32 @@
 | T2 | RAG 自行实现（可借助框架但需理解） | ✅ | 手写检索/Prompt/流式，未黑盒 LangChain Chain |
 | T3 | 向量检索与 LLM 在后端 | ✅ | 前端仅调 `/chat/stream` |
 | T4 | AI 模块异常处理（超时/限流） | ✅ | `llm_error_recovery.py`、`llm_gateway.py` |
-| T5 | SSE 流式输出 | ✅ | 见 [API文档.md](./API文档.md) |
-| T6 | MySQL 存元数据 | ✅ | 见 [数据库设计.md](./数据库设计.md) |
+| T5 | SSE 流式输出 | ✅ | 见 [API文档.md](../docxl/API文档.md) |
+| T6 | MySQL 存元数据 | ✅ | 见 [数据库设计.md](../docxl/数据库设计.md) |
 | T7 | Chroma 向量库 | ✅ | `vectorstore.py` |
 | T8 | OpenAI 兼容 LLM API | ✅ | 通义千问等，见 `.env.example` |
-| T9 | Embedding（bge 等） | ✅ | `bge-small-zh-v1.5` CPU |
+| T9 | Embedding（bge 等） | ✅ | `bge-large-zh-v1.5` 本地快照 |
 | T10 | `.env.example` 不含真实 Key | ✅ | 根目录已提供 |
 
 ---
 
-## 四、提交物目录对照（PRD §提交要求）
+## 4 提交物目录对照（PRD 提交要求）
 
 | PRD 要求路径 | 状态 | 实际路径 |
 |--------------|------|----------|
 | `backend/` + README | ✅ | [backend/README.md](../backend/README.md) |
 | `数据库初始化脚本/` | ✅ | [backend/数据库初始化脚本/](../backend/数据库初始化脚本/) |
 | `frontend/` + README | ✅ | [frontend/README.md](../frontend/README.md) |
-| `docs/API文档.md` | ✅ | [API文档.md](./API文档.md) |
-| `docs/数据库设计.md` | ✅ | [数据库设计.md](./数据库设计.md) |
-| `docs/AI架构设计.md` | ✅（已更新） | [AI架构设计.md](./AI架构设计.md) |
-| `docs/业务流程说明.md` | ✅ | [业务流程说明.md](./业务流程说明.md) |
+| `docxl/API文档.md` | ✅ | [API文档.md](../docxl/API文档.md) |
+| `docxl/数据库设计.md` | ✅ | [数据库设计.md](../docxl/数据库设计.md) |
+| `docxl/AI架构设计.md` | ✅（已更新） | [AI架构设计.md](../docxl/AI架构设计.md) |
+| `docxl/业务流程说明.md` | ✅ | [业务流程说明.md](../docxl/业务流程说明.md) |
 | `项目说明.md` | ✅（已更新） | [项目说明.md](../项目说明.md) |
 | `运行指南.md` | ✅ | [运行指南.md](../运行指南.md) |
 
 ---
 
-## 五、验收结论
+## 5 验收结论
 
 | 维度 | 结论 |
 |------|------|

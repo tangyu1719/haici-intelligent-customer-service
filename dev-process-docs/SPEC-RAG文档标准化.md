@@ -5,7 +5,7 @@
 > **日期**：2026-06-12  
 > **状态**：已批准 · 实施中（Owner 2026-06-12 裁决）  
 > **产品需求文档**：`HaiCi笔试_AI 智能客服系统_PRD.md`（只读）  
-> **关联 SPEC**：`SPEC-AI问答Agent.md`（分块策略已实施）、`docs/AI架构设计.md`
+> **关联 SPEC**：`SPEC-AI问答Agent.md`（分块策略已实施）、`docxl/AI架构设计.md`
 
 ---
 
@@ -128,9 +128,9 @@
 **硬性要求（违反则视为入库失败或 `status=failed`）：**
 
 1. **必须抽取**：文档内每一张可见图片保存为独立文件，禁止仅在 MD 中写「见原 Word」而不落盘。
-2. **必须打链接**：在 `normalized.md` 对应位置插入 **Markdown 图片语法**，`src` 为**可解析的 HTTP 路径**（见 §6）。
+2. **必须打链接**：在 `normalized.md` 对应位置插入 **Markdown 图片语法**，`src` 为**可解析的 HTTP 路径**（见 章节 6）。
 3. **必须打标记**：每张图在 MD 中紧邻链接处插入 **HTML 注释占位符** `<!-- IMG:{image_id} -->`，供 OCR/VLM 完成后**原位回插**扩展段落（不破坏链接）。
-4. **必须分类**：每张图经 VLM **类型识别** 后走路由（§7）；禁止未分类直接入库。
+4. **必须分类**：每张图经 VLM **类型识别** 后走路由（章节 7）；禁止未分类直接入库。
 5. **必须可验证**：提供 `GET /api/v1/knowledge/documents/{id}/assets` 或静态 `/output/...` 访问，前端/ curl 可 200 打开图片链接。
 
 ---
@@ -153,7 +153,7 @@ DOCX
  → 每遇内嵌图：写出 images/img_N.ext
  → MD 中写入：<!-- IMG:img_N --> + ![alt](public_url)
  → 本地 OCR（pytesseract / MinerU._local_ocr_fallback，与本系统一致）
- → VLM 分类 + 分路由（§7）
+ → VLM 分类 + 分路由（章节 7）
  → 回插 OCR/VLM/流程图文本块至占位符下方
  → normalized.md / manifest.json
 ```
@@ -173,7 +173,7 @@ DOCX
 | **P1** | PyMuPDF 文本 + 页图 OCR 兜底 | 纯文本 PDF、MinerU 不可用 |
 | **P2** | 页级 rasterize + OCR | 整页长图/扫描页 |
 
-PDF 内 `images/` 目录与 MD 链接规则 **同 DOCX**（§6）。MinerU 产出的 `![](images/xxx.png)` 须 **重写为** HaiCi 统一 `public_url`（禁止相对路径直接入库而不映射）。
+PDF 内 `images/` 目录与 MD 链接规则 **同 DOCX**（章节 6）。MinerU 产出的 `![](images/xxx.png)` 须 **重写为** HaiCi 统一 `public_url`（禁止相对路径直接入库而不映射）。
 
 ---
 
@@ -216,7 +216,7 @@ PDF 内 `images/` 目录与 MD 链接规则 **同 DOCX**（§6）。MinerU 产�
 |--------------|------|----------|
 | `ui_menu` | 文档内的**软件界面/菜单截图**（与 HaiCi 产品 Casbin 菜单无关） | **纯描述**：哪个系统/哪个菜单或模块、可见元素；**结合**文档上下文，禁止编造 |
 | `ui_design` | 装饰性 UI、banner、图标墙、营销图 | **纯描述**：是什么、与什么功能/模块相关；不 OCR 逐字除非 OCR 已高置信 |
-| `flowchart` | 流程图、泳道图、架构连线图 | **走 §8 专用管道**；RAG 正文以结构化结果（块列表/Mermaid 摘要）为主 |
+| `flowchart` | 流程图、泳道图、架构连线图 | **走 章节 8 专用管道**；RAG 正文以结构化结果（块列表/Mermaid 摘要）为主 |
 | `chart` | 统计图、表格截图 | VLM `understand_chart` + OCR 互补 |
 | `api_diagram` | 接口/时序图 | VLM `understand_api_diagram` |
 | `photo` | 照片/实物 | 通用 `understand_image` 摘要 |
@@ -367,7 +367,7 @@ HaiCi 已封装：
 
 ## 待二次审阅（由 Owner 回填）
 
-- [x] Q1～Q7 已裁决（见 §13）
+- [x] Q1～Q7 已裁决（见 章节 13）
 - [x] DOCX P0 = python-docx + 百度 OCR + 本地兜底
 - [x] 流程图 CV 失败 = 降级入库
 - [ ] 百度 OCR 密钥已在 `.env` 配置并验通

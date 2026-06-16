@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     RAG_COARSE_TOP_K: int = int(os.getenv("RAG_COARSE_TOP_K", os.getenv("RAG_COARSE_POOL_K", "100")))
     # 精筛落档梯度：粗筛池大且分数高→高档；池小或分数分散→低档
     RAG_GRADIENT_K: str = os.getenv("RAG_GRADIENT_K", "10,8,5,3")
-    RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.35"))
+    RAG_SCORE_THRESHOLD: float = float(os.getenv("RAG_SCORE_THRESHOLD", "0.65"))
     # 精筛「高质量簇」判定：top 与多数片段 hybrid 分均高于此阈值时可顶格落档
     RAG_HIGH_SCORE_THRESHOLD: float = float(os.getenv("RAG_HIGH_SCORE_THRESHOLD", "0.65"))
     # 相邻片段分差超过此值视为断层，在精筛阶段截断
@@ -114,6 +114,16 @@ class Settings(BaseSettings):
     # ── Ollama 本地模型(用于意图识别/Query 改写加速) ──
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2:0.5b")
+    # 预处理：Ollama 失败后是否再尝试网关大模型（Greedy JSON）；再失败才规则降级
+    PIPELINE_GATEWAY_LLM_FALLBACK: bool = os.getenv(
+        "PIPELINE_GATEWAY_LLM_FALLBACK", "true"
+    ).lower() in ("1", "true", "yes")
+    # 硬编码术语表映射（term_dictionary.py）；默认关闭，需结合业务树形分层后显式开启
+    TERM_MAPPING_ENABLED: bool = os.getenv("TERM_MAPPING_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     IMAGE_PROCESS_WORKERS: int = int(os.getenv("IMAGE_PROCESS_WORKERS", "4"))
     # 默认关闭类型分类 VLM，每张图少一次网关调用（UI 手册场景收益大）
     IMAGE_CLASSIFY_ENABLED: bool = os.getenv("IMAGE_CLASSIFY_ENABLED", "false").lower() in ("1", "true", "yes")
@@ -123,8 +133,8 @@ class Settings(BaseSettings):
     ANTI_DILUTION_THRESHOLD: int = int(os.getenv("ANTI_DILUTION_THRESHOLD", "8"))
     ANTI_DILUTION_MAX_GROUPS: int = int(os.getenv("ANTI_DILUTION_MAX_GROUPS", "5"))
 
-    # ── ReAct + RAG Tool Calling（复杂多步问答） ──
-    REACT_ENABLED: bool = os.getenv("REACT_ENABLED", "true").lower() in ("1", "true", "yes")
+    # ── ReAct + RAG Tool Calling（复杂多步问答，默认关闭，走简单 RAG；后续可 REACT_ENABLED=true 开启） ──
+    REACT_ENABLED: bool = os.getenv("REACT_ENABLED", "false").lower() in ("1", "true", "yes")
     REACT_MAX_STEPS: int = int(os.getenv("REACT_MAX_STEPS", "3"))
     REACT_MAX_RAG_CALLS: int = int(os.getenv("REACT_MAX_RAG_CALLS", "3"))
 
