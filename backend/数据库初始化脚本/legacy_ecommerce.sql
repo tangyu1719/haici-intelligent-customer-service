@@ -1,3 +1,8 @@
+-- =============================================================================
+-- legacy_ecommerce.sql — 已废弃
+-- 早期电商演示表（products/orders 等），库名 ecommerce，不属于 haici_cs，请勿执行。
+-- =============================================================================
+
 CREATE DATABASE IF NOT EXISTS ecommerce DEFAULT CHARACTER SET utf8mb4;
 USE ecommerce;
 

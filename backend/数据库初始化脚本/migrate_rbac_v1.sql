@@ -1,5 +1,6 @@
 -- 登录模块 RBAC / 菜单 / 日志 / Refresh Token 迁移 v1
 -- 日期：2026-06-12
+-- 注意：本脚本含历史 FOREIGN KEY 定义，已废弃；新环境请用 schema_full_v1.sql（无 DB 外键）
 USE haici_cs;
 
 -- 扩展 users（保留 id FK，新增对外 user_no 等）
