@@ -1,6 +1,6 @@
 from datetime import datetime
 
-
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -22,9 +22,13 @@ from app.services.feedback_detail import build_feedback_detail
 
 from app.services.list_query import ListQuery, apply_sort, list_query_params, page_result, paginate
 
+from app.services.user_profile_memory import process_positive_feedback
+
 
 
 router = APIRouter(prefix="/feedback", tags=["反馈"])
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -285,6 +289,27 @@ def submit_feedback(
         db.rollback()
 
         raise HTTPException(status_code=500, detail=f"反馈保存失败：{type(exc).__name__}") from exc
+
+    # 5 星反馈沉淀原子事实到用户 MD 画像
+    fb_row = (
+        db.query(MessageFeedback)
+        .filter(MessageFeedback.message_id == message_id, MessageFeedback.user_id == current_user.id)
+        .first()
+    )
+    if fb_row and fb_row.rating == 5:
+        try:
+            process_positive_feedback(
+                db,
+                user_id=current_user.id,
+                message_id=message_id,
+                rating=5,
+                comment=comment_text,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[智能客服-用户画像|feedback.submit|process_positive|硬编执行|失败] error_type=%s",
+                type(exc).__name__,
+            )
 
     return {"ok": True}
 
