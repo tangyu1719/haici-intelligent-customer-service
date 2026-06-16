@@ -18,6 +18,7 @@ import httpx
 
 from app.config import settings
 from app.embedding_loader import load_embedder
+from app.services.chat_context import trim_messages_to_budget
 from app.services.llm_gateway import GatewayNode, get_llm_gateway
 
 
@@ -152,31 +153,35 @@ class LLMWrapper:
 
 
 
-    def _sync_chat(self, node: GatewayNode, messages: list[dict], temperature: float, max_tokens: int) -> str:
-
-        payload = {
-
-            "model": node.model,
-
-            "messages": messages,
-
-            "stream": False,
-
-            "temperature": temperature,
-
-            "max_tokens": max_tokens,
-
-        }
+    def _sync_chat(
+        self,
+        node: GatewayNode,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        task_type: str = "qa",
+    ) -> str:
+        from app.services.gateway_circuit_breaker import breaker
+        from app.services.llm_error_recovery import (
+            LLMCallError,
+            RecoveryAction,
+            RecoveryState,
+            classify_http_error,
+            plan_recovery,
+            run_recovery_step,
+        )
 
         url = _openai_chat_url(node.base_url)
-
         headers = {
-
             "Authorization": f"Bearer {node.api_key}",
-
             "Content-Type": "application/json",
-
         }
+        state = RecoveryState()
+        current_node = node
+        current_messages = list(messages)
+        current_max_tokens = max_tokens
+        current_temperature = temperature
+        max_loops = 6
 
         with httpx.Client(timeout=settings.LLM_TIMEOUT_SECONDS, trust_env=False) as client:
             import time
@@ -184,40 +189,156 @@ class LLMWrapper:
             from app.services.agent_call_logger import log_agent_call
 
             t0 = time.perf_counter()
-            ok = True
-            err = ""
-            try:
-                resp = client.post(url, headers=headers, json=payload)
-                if resp.status_code >= 400:
-                    ok = False
-                    err = f"HTTP {resp.status_code}"
-                    raise httpx.HTTPStatusError(err, request=resp.request, response=resp)
-                data = resp.json()
-                content = str(data["choices"][0]["message"]["content"]).strip()
-                usage = data.get("usage") or {}
-                tokens = int(usage.get("total_tokens") or len(content) // 2)
-                log_agent_call(
-                    api_type="llm",
-                    target=f"{node.provider}:{node.model}",
-                    request_summary=payload["messages"][-1]["content"][:500] if payload.get("messages") else "",
-                    response_summary=content[:500],
-                    time_consume_ms=int((time.perf_counter() - t0) * 1000),
-                    success=ok,
-                    error_message=err,
-                    tokens=tokens,
-                )
-                return content
-            except Exception as exc:
-                log_agent_call(
-                    api_type="llm",
-                    target=f"{node.provider}:{node.model}",
-                    request_summary=str(payload.get("messages", ""))[:500],
-                    response_summary="",
-                    time_consume_ms=int((time.perf_counter() - t0) * 1000),
-                    success=False,
-                    error_message=str(exc)[:300],
-                )
-                raise
+            last_exc: Exception | None = None
+
+            for loop_idx in range(max_loops):
+                payload = {
+                    "model": current_node.model,
+                    "messages": current_messages,
+                    "stream": False,
+                    "temperature": current_temperature,
+                    "max_tokens": current_max_tokens,
+                }
+                try:
+                    resp = client.post(url, headers={
+                        **headers,
+                        "Authorization": f"Bearer {current_node.api_key}",
+                    }, json=payload)
+                    if resp.status_code >= 400:
+                        body = resp.text or ""
+                        error_code, msg, _ = classify_http_error(
+                            current_node.provider,
+                            current_node.id,
+                            resp.status_code,
+                            body,
+                        )
+                        plan = plan_recovery(
+                            error_code,
+                            attempt=loop_idx + 1,
+                            retries_used=state.retries_used,
+                            switches_used=state.switches_used,
+                            ops_used=state.ops_used,
+                            context={"messages_count": len(current_messages)},
+                        )
+                        if plan.action == RecoveryAction.ABORT:
+                            raise LLMCallError(
+                                error_code,
+                                msg,
+                                provider=current_node.provider,
+                                node_id=current_node.id,
+                                detail=body[:300],
+                            )
+                        current_messages, current_max_tokens, current_temperature, new_node_id = run_recovery_step(
+                            plan,
+                            state,
+                            messages=current_messages,
+                            max_tokens=current_max_tokens,
+                            temperature=current_temperature,
+                            task_type=task_type,
+                            error_code=error_code,
+                            provider=current_node.provider,
+                            node_id=current_node.id,
+                            status_code=resp.status_code,
+                            response_body=body,
+                        )
+                        if new_node_id:
+                            fallback = get_llm_gateway().nodes.get(new_node_id)
+                            if fallback:
+                                current_node = fallback
+                                self._last_node = fallback
+                                url = _openai_chat_url(current_node.base_url)
+                        continue
+
+                    data = resp.json()
+                    content = str(data["choices"][0]["message"]["content"]).strip()
+                    usage = data.get("usage") or {}
+                    tokens = int(usage.get("total_tokens") or len(content) // 2)
+                    breaker.get_or_create(current_node.id).record_success()
+                    log_agent_call(
+                        api_type="llm",
+                        target=f"{current_node.provider}:{current_node.model}",
+                        request_summary=payload["messages"][-1]["content"][:500] if payload.get("messages") else "",
+                        response_summary=content[:500],
+                        time_consume_ms=int((time.perf_counter() - t0) * 1000),
+                        success=True,
+                        error_message="",
+                        tokens=tokens,
+                    )
+                    return content
+                except httpx.TimeoutException as exc:
+                    last_exc = exc
+                    error_code, msg, _ = classify_http_error(
+                        current_node.provider,
+                        current_node.id,
+                        0,
+                        "",
+                        str(exc),
+                    )
+                    plan = plan_recovery(
+                        error_code,
+                        attempt=loop_idx + 1,
+                        retries_used=state.retries_used,
+                        switches_used=state.switches_used,
+                        ops_used=state.ops_used,
+                    )
+                    if plan.action == RecoveryAction.ABORT:
+                        raise LLMCallError(
+                            error_code,
+                            msg,
+                            provider=current_node.provider,
+                            node_id=current_node.id,
+                            detail=str(exc)[:300],
+                        ) from exc
+                    current_messages, current_max_tokens, current_temperature, new_node_id = run_recovery_step(
+                        plan,
+                        state,
+                        messages=current_messages,
+                        max_tokens=current_max_tokens,
+                        temperature=current_temperature,
+                        task_type=task_type,
+                        error_code=error_code,
+                        provider=current_node.provider,
+                        node_id=current_node.id,
+                        status_code=0,
+                        response_body="",
+                    )
+                    if new_node_id:
+                        fallback = get_llm_gateway().nodes.get(new_node_id)
+                        if fallback:
+                            current_node = fallback
+                            self._last_node = fallback
+                            url = _openai_chat_url(current_node.base_url)
+                    continue
+                except LLMCallError:
+                    raise
+                except Exception as exc:
+                    last_exc = exc
+                    log_agent_call(
+                        api_type="llm",
+                        target=f"{current_node.provider}:{current_node.model}",
+                        request_summary=str(payload.get("messages", ""))[:500],
+                        response_summary="",
+                        time_consume_ms=int((time.perf_counter() - t0) * 1000),
+                        success=False,
+                        error_message=str(exc)[:300],
+                    )
+                    raise
+
+            log_agent_call(
+                api_type="llm",
+                target=f"{current_node.provider}:{current_node.model}",
+                request_summary=str(messages)[:500],
+                response_summary="",
+                time_consume_ms=int((time.perf_counter() - t0) * 1000),
+                success=False,
+                error_message=str(last_exc or "recovery_exhausted")[:300],
+            )
+            raise LLMCallError(
+                classify_http_error(current_node.provider, current_node.id, 0, "", "recovery_exhausted")[0],
+                "LLM 错误恢复次数已用尽",
+                provider=current_node.provider,
+                node_id=current_node.id,
+            )
 
 
 
@@ -247,6 +368,8 @@ class LLMWrapper:
 
                 max_tokens,
 
+                task_type=task_type,
+
             )
 
             if len(RESPONSE_CACHE) >= CACHE_MAX_SIZE:
@@ -258,6 +381,17 @@ class LLMWrapper:
             return result
 
         except Exception as e:
+            from app.services.llm_error_recovery import LLMCallError
+
+            if isinstance(e, LLMCallError):
+                logger.error(
+                    "[智能客服-对话|llms|LLM|工具执行|同步] 恢复失败; code=%s; provider=%s; node=%s; error=%s",
+                    e.error_code.value,
+                    e.provider,
+                    e.node_id,
+                    e.message,
+                )
+                return f"AI服务异常 [{e.error_code.value}]: {e.message}"
 
             logger.error(
 
@@ -275,6 +409,15 @@ class LLMWrapper:
 
 
 
+    def _resolve_input_budget(self, node: GatewayNode, task_type: str) -> tuple[int, int]:
+        """按节点上下文上限计算输入字符预算与输出 token 上限。"""
+        ctx = node.context_chars or int(settings.CHAT_MAX_CONTEXT_CHARS)
+        reserve = max(0, int(settings.CHAT_CONTEXT_RESERVE_CHARS))
+        out_tokens = node.max_output_tokens or (512 if task_type == "qa" else 1024)
+        out_chars = out_tokens * 2
+        max_in = max(2048, ctx - reserve - out_chars)
+        return max_in, out_tokens
+
     async def stream_chat(self, messages: list[dict[str, str]], task_type: str = "qa") -> AsyncIterator[LLMStreamDelta]:
 
         node = self._resolve_node(task_type)
@@ -287,27 +430,18 @@ class LLMWrapper:
 
 
 
-        # 限制输入大小避免超出豆包4K上下文
-        trimmed = []
-        total = 0
-        max_in = 3000
-        for m in reversed(messages):
-            c = str(m.get("content", ""))
-            if total + len(c) > max_in:
-                r = max_in - total
-                if r > 50: trimmed.insert(0, {**m, "content": c[:r]})
-                break
-            trimmed.insert(0, m)
-            total += len(c)
+        # 按模型实际上下文上限裁剪输入（上游 session_context 已做摘要+滑动窗口）
+        max_in, max_out = self._resolve_input_budget(node, task_type)
+        trimmed = trim_messages_to_budget(messages, max_in)
 
         payload = {
             "model": node.model,
             "messages": trimmed,
             "stream": True,
             "temperature": 0.2,
-            "max_tokens": 1024,
+            "max_tokens": max_out,
         }
-        if _is_thinking_model(node):
+        if _is_thinking_model(node) and task_type not in ("qa",):
             payload["thinking"] = {"type": "enabled"}
 
         url = _openai_chat_url(node.base_url)
@@ -333,11 +467,77 @@ class LLMWrapper:
 
                     if resp.status_code >= 400:
 
-                        body = await resp.aread()
+                        body_bytes = await resp.aread()
+                        body = body_bytes.decode("utf-8", errors="replace")
+                        from app.services.llm_error_recovery import (
+                            LLMCallError,
+                            RecoveryAction,
+                            RecoveryState,
+                            classify_http_error,
+                            plan_recovery,
+                            run_recovery_step,
+                        )
+
+                        error_code, msg, _ = classify_http_error(
+                            node.provider, node.id, resp.status_code, body
+                        )
+                        state = RecoveryState()
+                        plan = plan_recovery(error_code, ops_used=False)
+                        if plan.action != RecoveryAction.ABORT:
+                            try:
+                                new_msgs, new_max, new_temp, new_node_id = run_recovery_step(
+                                    plan,
+                                    state,
+                                    messages=trimmed,
+                                    max_tokens=max_out,
+                                    temperature=0.2,
+                                    task_type=task_type,
+                                    error_code=error_code,
+                                    provider=node.provider,
+                                    node_id=node.id,
+                                    status_code=resp.status_code,
+                                    response_body=body,
+                                )
+                                if new_node_id:
+                                    fb = get_llm_gateway().nodes.get(new_node_id)
+                                    if fb:
+                                        node = fb
+                                        self._last_node = fb
+                                trimmed = new_msgs
+                                max_out = new_max
+                                payload["messages"] = trimmed
+                                payload["max_tokens"] = max_out
+                                payload["temperature"] = new_temp
+                                url = _openai_chat_url(node.base_url)
+                                headers["Authorization"] = f"Bearer {node.api_key}"
+                                async with client.stream("POST", url, headers=headers, json=payload) as resp2:
+                                    if resp2.status_code < 400:
+                                        async for line in resp2.aiter_lines():
+                                            if not line or not line.startswith("data:"):
+                                                continue
+                                            data = line[5:].strip()
+                                            if data == "[DONE]":
+                                                break
+                                            try:
+                                                chunk = json.loads(data)
+                                                choice = chunk["choices"][0]
+                                                delta_obj = choice.get("delta") or {}
+                                                message_obj = choice.get("message") or {}
+                                                reasoning, content = _split_stream_delta(delta_obj, message_obj)
+                                                if reasoning:
+                                                    yield LLMStreamDelta("think", reasoning)
+                                                if content:
+                                                    answer_parts.append(content)
+                                                    yield LLMStreamDelta("answer", content)
+                                            except (json.JSONDecodeError, KeyError, IndexError):
+                                                continue
+                                        return
+                            except LLMCallError:
+                                pass
 
                         logger.error(
 
-                            "[智能客服-对话|llms|LLM|工具执行|流式] HTTP错误; status=%s; provider=%s; model=%s; body=%s",
+                            "[智能客服-对话|llms|LLM|工具执行|流式] HTTP错误; status=%s; provider=%s; model=%s; code=%s; body=%s",
 
                             resp.status_code,
 
@@ -345,11 +545,13 @@ class LLMWrapper:
 
                             node.model,
 
+                            error_code.value,
+
                             body[:300],
 
                         )
 
-                        yield LLMStreamDelta("answer", f"【服务异常】大模型暂时不可用（{node.name}）。")
+                        yield LLMStreamDelta("answer", f"AI服务异常 [{error_code.value}]: {msg}")
 
                         return
 
@@ -386,8 +588,17 @@ class LLMWrapper:
                             continue
 
         except httpx.TimeoutException:
+            from app.services.gateway_error_handler import ErrorCode
+            from app.services.llm_error_recovery import classify_http_error
 
-            yield LLMStreamDelta("answer", "【请求超时】大模型响应超时，请稍后重试。")
+            code, msg, _ = classify_http_error(
+                node.provider if node else "ark",
+                node.id if node else "unknown",
+                0,
+                "",
+                "timed out",
+            )
+            yield LLMStreamDelta("answer", f"AI服务异常 [{code.value}]: {msg}")
 
         except httpx.HTTPError as exc:
 

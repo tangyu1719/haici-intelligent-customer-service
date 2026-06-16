@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.services.model_context_registry import (
+    lookup_context_chars,
+    lookup_context_tokens,
+    lookup_max_output_tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +30,15 @@ class GatewayNode:
     weight: int = 100
     status: str = "active"
     tags: list[str] = field(default_factory=list)
+    context_tokens: int = 0
+    context_chars: int = 0
+    max_output_tokens: int = 0
+
+    def bind_context_limits(self, task_type: str = "qa") -> None:
+        """导入/注册节点时绑定上下文与输出上限。"""
+        self.context_tokens = lookup_context_tokens(self.model)
+        self.context_chars = lookup_context_chars(self.model)
+        self.max_output_tokens = lookup_max_output_tokens(self.model, task_type)
 
 
 class LLMGateway:
@@ -59,6 +73,7 @@ class LLMGateway:
 
         # 2) 环境变量构建默认节点（通义 + 方舟双接入点）
         self._ensure_env_nodes()
+        self._bind_all_node_contexts()
 
         if not self.nodes:
             logger.warning("[智能客服-LLM|llm_gateway|配置|硬编执行|加载] 无可用网关节点，请检查 .env")
@@ -94,7 +109,7 @@ class LLMGateway:
             provider = str(item.get("provider") or settings.GATEWAY_PROVIDER or "ark").strip().lower()
             if provider == "openai":
                 provider = "openai_compatible"
-            self.nodes[node_id] = GatewayNode(
+            node = GatewayNode(
                 id=node_id,
                 name=str(item.get("name") or node_id),
                 provider=provider,
@@ -106,6 +121,12 @@ class LLMGateway:
                 status=str(item.get("status") or "active").strip().lower(),
                 tags=[str(t).lower() for t in (item.get("tags") or []) if str(t).strip()],
             )
+            if item.get("context_tokens"):
+                from app.services.model_context_registry import register_model_context
+
+                register_model_context(endpoint, int(item["context_tokens"]))
+            node.bind_context_limits()
+            self.nodes[node_id] = node
 
     def _ensure_env_nodes(self) -> None:
         # 通义 DashScope（OpenAI 兼容模式）
@@ -174,9 +195,39 @@ class LLMGateway:
                 tags=["qa", "chat"],
             )
 
+    def _bind_all_node_contexts(self) -> None:
+        for node in self.nodes.values():
+            if not node.context_chars:
+                node.bind_context_limits()
+
+    def _active_nodes(self, exclude: set[str] | None = None) -> list[GatewayNode]:
+        """返回可用节点（排除指定 ID，并过滤熔断不可用节点）。"""
+        from app.services.gateway_circuit_breaker import breaker
+
+        skip = exclude or set()
+        active = [
+            n
+            for n in self.nodes.values()
+            if n.status == "active" and n.api_key and n.model and n.id not in skip
+        ]
+        available: list[GatewayNode] = []
+        for n in active:
+            health = breaker.get(n.id)
+            if health is None or health.is_available():
+                available.append(n)
+        return available
+
     def choose(self, task_type: str = "qa") -> GatewayNode | None:
+        return self.choose_fallback(task_type, exclude=None)
+
+    def choose_fallback(
+        self,
+        task_type: str = "qa",
+        exclude: set[str] | None = None,
+    ) -> GatewayNode | None:
+        """按任务类型与优先级选择节点；exclude 用于限流/故障后切换备用节点。"""
         task = (task_type or "qa").strip().lower()
-        active = [n for n in self.nodes.values() if n.status == "active" and n.api_key and n.model]
+        active = self._active_nodes(exclude)
         if not active:
             return None
 
@@ -214,6 +265,8 @@ class LLMGateway:
                     "priority": n.priority,
                     "status": n.status,
                     "tags": n.tags,
+                    "context_tokens": n.context_tokens,
+                    "context_chars": n.context_chars,
                     "api_key_hint": n._mask_secret(n.api_key),
                 }
             )
@@ -227,6 +280,7 @@ class LLMGateway:
                 "provider": chat_node.provider if chat_node else "",
                 "model": chat_node._mask_model(chat_node.model) if chat_node else "",
                 "base_url": chat_node.base_url if chat_node else "",
+                "context_chars": chat_node.context_chars if chat_node else 0,
             },
             "nodes": nodes,
         }
