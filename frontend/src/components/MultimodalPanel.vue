@@ -20,6 +20,7 @@ interface TaskItem {
   pipeline_stages: Record<string, { status: string; label: string; error?: string }>
   output_dir: string
   output_md: string
+  output_txt?: string
   output_manifest: string
   document_id: number | null
   created_at: string
@@ -36,6 +37,7 @@ const detailTask = ref<TaskItem | null>(null)
 const detailLogs = ref<LogEntry[]>([])
 const esRef = ref<EventSource | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
+const exportFormat = ref<'md' | 'txt'>('md')
 let pollTimer: number | null = null
 
 const canSubmitUpload = computed(
@@ -213,6 +215,24 @@ function connectSSE(taskId: string) {
 function disconnectSSE() {
   esRef.value?.close()
   esRef.value = null
+}
+async function downloadExport(taskId: string, filename: string) {
+  const fmt = exportFormat.value
+  const r = await fetch(`/api/v1/multimodal-tasks/${taskId}/export?format=${fmt}`, {
+    headers: authHeaders(),
+  })
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}))
+    alert(typeof d.detail === 'string' ? d.detail : '下载失败')
+    return
+  }
+  const blob = await r.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${fixDisplayFilename(filename).replace(/\.[^.]+$/, '')}.${fmt}`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 async function deleteTask(taskId: string, status?: string) {
   const active = status === 'pending' || status === 'running'
@@ -469,9 +489,23 @@ onUnmounted(() => {
             </div>
             <div
               v-if="detailTask.status === 'completed'"
-              class="px-4 py-2 text-[10px] text-[#94a3b8] shrink-0"
+              class="px-4 py-2 border-b text-[11px] shrink-0 flex flex-wrap items-center gap-2"
             >
-              中间产物: normalized.md / manifest.json → 知识库管理页查看
+              <span class="font-bold text-[#64748b]">导出格式:</span>
+              <select
+                v-model="exportFormat"
+                class="border rounded px-2 py-1 text-[11px] bg-white"
+              >
+                <option value="md">Markdown (.md)</option>
+                <option value="txt">纯文本 (.txt)</option>
+              </select>
+              <button
+                class="text-[11px] px-3 py-1 rounded bg-[#2563eb] text-white font-bold hover:bg-[#1d4ed8]"
+                @click="downloadExport(detailTask.task_id, detailTask.filename)"
+              >
+                下载 {{ exportFormat.toUpperCase() }}
+              </button>
+              <span class="text-[10px] text-[#94a3b8]">manifest.json 见产物目录</span>
             </div>
             <div class="flex-1 overflow-y-auto p-3 min-h-0">
               <div class="text-[10px] font-bold text-[#94a3b8] mb-2">

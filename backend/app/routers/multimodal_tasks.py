@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -291,3 +291,48 @@ def remove_task(
             )
 
     return {"ok": ok, "cancelled": was_active}
+
+
+@router.get("/{task_id}/export")
+def export_task_result(
+    task_id: str,
+    fmt: str = Query("md", alias="format", pattern="^(md|txt)$"),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """下载任务标准化产物：format=md 或 txt。"""
+    t = get_task(task_id)
+    if not t or t.get("tenant_id") != current_user.id:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if t.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="任务尚未完成，无法导出")
+
+    doc_id = t.get("document_id")
+    candidates: list[Path] = []
+    if fmt == "md":
+        if t.get("output_md"):
+            candidates.append(Path(t["output_md"]))
+        if doc_id:
+            candidates.append(kb_assets_dir(current_user.id, doc_id) / "normalized.md")
+    else:
+        if t.get("output_txt"):
+            candidates.append(Path(t["output_txt"]))
+        if doc_id:
+            candidates.append(kb_assets_dir(current_user.id, doc_id) / "normalized.txt")
+
+    export_path: Path | None = None
+    for p in candidates:
+        if p.is_file():
+            export_path = p
+            break
+
+    if not export_path:
+        raise HTTPException(status_code=404, detail=f"未找到 {fmt.upper()} 产物文件")
+
+    stem = Path(t.get("filename") or "document").stem
+    download_name = f"{stem}.{'md' if fmt == 'md' else 'txt'}"
+    media = "text/markdown; charset=utf-8" if fmt == "md" else "text/plain; charset=utf-8"
+    return FileResponse(
+        path=str(export_path),
+        media_type=media,
+        filename=download_name,
+    )

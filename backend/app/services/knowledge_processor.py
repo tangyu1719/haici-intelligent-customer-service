@@ -154,10 +154,12 @@ def ingest_uploaded_document(
             text = norm.text
             _done("normalize", {"manifest": manifest})
             if task_id:
+                txt_path = norm_md.with_suffix(".txt") if norm_md else None
                 update_task(
                     task_id,
                     output_dir=str(norm_md.parent) if norm_md else "",
                     output_md=str(norm_md) if norm_md else "",
+                    output_txt=str(txt_path) if txt_path and txt_path.is_file() else "",
                     output_manifest=str(Path(str(norm_md.parent)) / "manifest.json") if norm_md else "",
                 )
         else:
@@ -190,9 +192,12 @@ def ingest_uploaded_document(
         raise
     except Exception as e:
         if task_id:
+            import traceback
+
             t = get_task(task_id) or {}
             fail_sid = t.get("stage") or "normalize"
             if fail_sid not in {"inspect", "normalize", "chunk", "vectorize"}:
                 fail_sid = "normalize"
-            fail_stage(task_id, fail_sid, str(e)[:300])
+            err_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"[:2000]
+            fail_stage(task_id, fail_sid, err_detail)
         raise
