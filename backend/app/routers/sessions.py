@@ -26,6 +26,8 @@ from app.schemas import (
     SessionUpdateRequest,
 )
 from app.services.chat_session_store import sync_active_session_async
+from app.services.session_context_manager import mark_session_archived
+from app.services.user_profile_memory import archive_session_to_user_memory
 from app.services.list_query import (
     ListQuery,
     apply_date_range,
@@ -235,7 +237,7 @@ def get_session_detail(session_id: int, db: Session = Depends(get_db), current_u
     mq = _messages_query(db, session_id, msg_qry)
     rows, _ = paginate(mq, msg_qry)
     return SessionDetailResponse(
-        **base.model_dump(),
+        **{k: v for k, v in base.model_dump().items() if k != "user_id"},
         status=session.status,
         user_id=session.user_id,
         messages=[_message_item(m) for m in rows],
@@ -281,6 +283,21 @@ def update_session(
     return _session_item(session, int(msg_count))
 
 
+@router.post("/{session_id}/archive")
+def archive_session(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """手动归档会话：写入用户长期记忆并标记 status=0。"""
+    session = _owned_session(db, session_id, current_user.id)
+    if session.meta_json and isinstance(session.meta_json, dict) and session.meta_json.get("streaming"):
+        raise HTTPException(status_code=409, detail="该会话正在生成回答，请稍候再归档")
+    archive_session_to_user_memory(db, session, reason="manual_archive")
+    mark_session_archived(db, session, "manual_archive")
+    return {"ok": True, "id": session_id, "archived": True}
+
+
 @router.delete("/{session_id}")
 def user_delete_session(
     session_id: int,
@@ -293,6 +310,14 @@ def user_delete_session(
         raise HTTPException(status_code=409, detail="该会话正在生成回答，请稍候再删除")
     session.user_deleted = 1
     session.user_deleted_at = datetime.utcnow()
+    try:
+        archive_session_to_user_memory(db, session, reason="user_delete")
+    except Exception as exc:
+        logger.warning(
+            "[会话持久化|sessions.user_delete|archive_memory|硬编执行|失败] session_id=%s; error_type=%s",
+            session_id,
+            type(exc).__name__,
+        )
     db.commit()
     logger.info(
         "[会话持久化|sessions.user_delete|session_id=%s|硬编执行|完成] user_id=%s",

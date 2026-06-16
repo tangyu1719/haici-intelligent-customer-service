@@ -9,15 +9,11 @@
 import pytest
 import requests
 
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+from tests.http_regression_helpers import BASE_URL, login_password
 
 
 def _login():
-    """返回 admin 的 access_token"""
-    resp = requests.post(f"{BASE_URL}/auth/login", json={"username": "admin", "password": "admin"})
-    if resp.status_code != 200:
-        pytest.skip("登录失败")
-    return resp.json()["access_token"]
+    return login_password()
 
 
 class TestSessionCreate:
@@ -69,15 +65,15 @@ class TestSessionArchive:
         if resp.status_code != 200:
             pytest.skip("创建会话失败")
         sid = resp.json()["id"]
-        # 2. 归档
-        delete_resp = requests.delete(
-            f"{BASE_URL}/sessions/{sid}",
+        # 2. 归档（POST /archive，非 DELETE 软删）
+        archive_resp = requests.post(
+            f"{BASE_URL}/sessions/{sid}/archive",
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert delete_resp.status_code == 200
+        assert archive_resp.status_code == 200
 
     def test_get_archived_session_detail(self):
-        """归档后详情仍可访问（因软删除）"""
+        """归档后会话 status=0，详情接口对普通用户返回 404（active_only）。"""
         token = _login()
         resp = requests.post(
             f"{BASE_URL}/sessions",
@@ -86,9 +82,12 @@ class TestSessionArchive:
         if resp.status_code != 200:
             pytest.skip("创建会话失败")
         sid = resp.json()["id"]
-        requests.delete(f"{BASE_URL}/sessions/{sid}", headers={"Authorization": f"Bearer {token}"})
+        requests.post(
+            f"{BASE_URL}/sessions/{sid}/archive",
+            headers={"Authorization": f"Bearer {token}"},
+        )
         detail_resp = requests.get(
             f"{BASE_URL}/sessions/{sid}",
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert detail_resp.status_code == 200
+        assert detail_resp.status_code == 404
