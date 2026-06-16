@@ -9,14 +9,11 @@
 import pytest
 import requests
 
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+from tests.http_regression_helpers import BASE_URL, login_password
 
 
 def _login():
-    resp = requests.post(f"{BASE_URL}/auth/login", json={"username": "admin", "password": "admin"})
-    if resp.status_code != 200:
-        pytest.skip("登录失败")
-    return resp.json()["access_token"]
+    return login_password()
 
 
 class TestAdminFeedback:
@@ -57,7 +54,7 @@ class TestAdminEval:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert "ok" in data or "total_calls" in data
+        assert "period_days" in data or "by_type" in data or "summary" in data
 
 
 class TestAdminLogs:

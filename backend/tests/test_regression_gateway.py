@@ -4,6 +4,7 @@
 """
 
 import sys, os
+import json
 _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _backend_dir not in sys.path: sys.path.insert(0, _backend_dir)
 
@@ -122,6 +123,196 @@ class TestCircuitBreaker:
         assert r["is_error"] is True
         assert r["error_code"] == "LLM_RATE_LIMIT"
         assert r["strategy"] is not None
+
+
+# ═══ LLM 错误恢复（规则 + 运维 Agent） ═══════════════════
+
+class TestLLMErrorRecovery:
+    """TC-GW-006: 错误恢复策略执行"""
+
+    def test_plan_timeout_retry_then_switch(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import RecoveryAction, plan_recovery
+
+        p1 = plan_recovery(ErrorCode.LLM_TIMEOUT, retries_used=0, switches_used=0)
+        assert p1.action == RecoveryAction.RETRY
+        p2 = plan_recovery(ErrorCode.LLM_TIMEOUT, retries_used=2, switches_used=0)
+        assert p2.action == RecoveryAction.SWITCH_NODE
+        p3 = plan_recovery(ErrorCode.LLM_TIMEOUT, retries_used=2, switches_used=1)
+        assert p3.action == RecoveryAction.ABORT
+
+    def test_plan_rate_limit_switch_node(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import RecoveryAction, plan_recovery
+
+        p = plan_recovery(ErrorCode.LLM_RATE_LIMIT, switches_used=0)
+        assert p.action == RecoveryAction.SWITCH_NODE
+        assert p.backoff_seconds >= 0
+
+    def test_plan_invalid_request_ops_agent(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import RecoveryAction, plan_recovery
+
+        p1 = plan_recovery(ErrorCode.LLM_INVALID_REQUEST, ops_used=False)
+        assert p1.action == RecoveryAction.OPS_AGENT
+        p2 = plan_recovery(ErrorCode.LLM_INVALID_REQUEST, ops_used=True)
+        assert p2.action == RecoveryAction.ABORT
+
+    def test_plan_context_overflow_truncate(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import RecoveryAction, plan_recovery
+
+        p = plan_recovery(ErrorCode.LLM_CONTEXT_OVERFLOW, retries_used=0)
+        assert p.action == RecoveryAction.TRUNCATE_RETRY
+
+    def test_plan_content_filter_abort(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import RecoveryAction, plan_recovery
+
+        p = plan_recovery(ErrorCode.LLM_CONTENT_FILTER)
+        assert p.action == RecoveryAction.ABORT
+
+    def test_apply_param_patches(self):
+        from app.services.llm_error_recovery import apply_param_patches
+
+        msgs = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "x" * 5000},
+        ]
+        new_msgs, max_tok, temp = apply_param_patches(
+            msgs,
+            {"max_tokens": 256, "temperature": 0.05, "max_user_chars": 1000},
+            max_tokens=1024,
+            temperature=0.2,
+        )
+        assert max_tok == 256
+        assert temp == 0.05
+        assert len(new_msgs[-1]["content"]) <= 1000
+
+    def test_parse_ops_agent_json(self):
+        from app.services.llm_error_recovery import _parse_ops_json
+
+        raw = (
+            '诊断如下：{"fault_type":"参数错误","root_cause":"max_tokens过大",'
+            '"fix_actions":["降低max_tokens"],"param_patches":{"max_tokens":512}}'
+        )
+        d = _parse_ops_json(raw)
+        assert d.fault_type == "参数错误"
+        assert d.param_patches.get("max_tokens") == 512
+
+    def test_invoke_ops_agent_mock(self):
+        from app.services.gateway_error_handler import ErrorCode
+        from app.services.llm_error_recovery import invoke_ops_agent_diagnosis
+
+        def _mock_llm(prompt: str, task_type: str) -> str:
+            return json.dumps(
+                {
+                    "fault_type": "InvalidParameter",
+                    "root_cause": "model字段缺失",
+                    "fix_actions": ["补全model"],
+                    "param_patches": {"max_tokens": 512, "temperature": 0.1},
+                },
+                ensure_ascii=False,
+            )
+
+        d = invoke_ops_agent_diagnosis(
+            error_code=ErrorCode.LLM_INVALID_REQUEST,
+            provider="ark",
+            node_id="node_a",
+            status_code=400,
+            response_body='{"error":{"code":"InvalidParameter"}}',
+            messages=[{"role": "user", "content": "hello"}],
+            task_type="qa",
+            llm_call=_mock_llm,
+        )
+        assert d.has_param_patches
+        assert d.param_patches["max_tokens"] == 512
+
+    def test_run_recovery_switch_node(self):
+        from app.services.gateway_error_handler import ErrorCode, get_strategy
+        from app.services.llm_error_recovery import (
+            RecoveryAction,
+            RecoveryPlan,
+            RecoveryState,
+            run_recovery_step,
+        )
+        from app.services.llm_gateway import GatewayNode, LLMGateway
+
+        gw = LLMGateway()
+        gw.nodes.clear()
+        gw.nodes["n1"] = GatewayNode(
+            id="n1", name="A", provider="ark", base_url="http://a", api_key="k", model="m1", priority=1
+        )
+        gw.nodes["n2"] = GatewayNode(
+            id="n2", name="B", provider="qwen", base_url="http://b", api_key="k", model="m2", priority=2
+        )
+        import app.services.llm_gateway as lg_mod
+        old = lg_mod._gateway
+        lg_mod._gateway = gw
+        try:
+            plan = RecoveryPlan(
+                action=RecoveryAction.SWITCH_NODE,
+                error_code=ErrorCode.LLM_RATE_LIMIT,
+                strategy=get_strategy(ErrorCode.LLM_RATE_LIMIT),
+                message="switch",
+            )
+            state = RecoveryState()
+            _, _, _, new_id = run_recovery_step(
+                plan,
+                state,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=512,
+                temperature=0.2,
+                task_type="qa",
+                error_code=ErrorCode.LLM_RATE_LIMIT,
+                provider="ark",
+                node_id="n1",
+                status_code=429,
+                response_body="rate limit",
+            )
+            assert new_id == "n2"
+            assert state.switches_used == 1
+        finally:
+            lg_mod._gateway = old
+
+    def test_sync_chat_retry_on_timeout(self, monkeypatch):
+        """模拟超时后规则重试成功"""
+        import httpx
+        from app.llms import LLMWrapper
+        from app.services.llm_gateway import GatewayNode
+
+        calls = {"n": 0}
+
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}], "usage": {"total_tokens": 3}}
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def post(self, *a, **k):
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise httpx.TimeoutException("timed out")
+                return _Resp()
+
+        monkeypatch.setattr(httpx, "Client", _Client)
+        node = GatewayNode(
+            id="t_node", name="T", provider="ark", base_url="http://t", api_key="k", model="m"
+        )
+        w = LLMWrapper()
+        out = w._sync_chat(node, [{"role": "user", "content": "hi"}], 0.1, 64, task_type="qa")
+        assert out == "ok"
+        assert calls["n"] == 2
 
 
 # ═══ 语义路由 ═════════════════════════════════════════════

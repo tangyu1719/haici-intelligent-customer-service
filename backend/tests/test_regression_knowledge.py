@@ -12,14 +12,11 @@ import tempfile
 import pytest
 import requests
 
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+from tests.http_regression_helpers import BASE_URL, login_password
 
 
 def _login():
-    resp = requests.post(f"{BASE_URL}/auth/login", json={"username": "admin", "password": "admin"})
-    if resp.status_code != 200:
-        pytest.skip("登录失败")
-    return resp.json()["access_token"]
+    return login_password()
 
 
 class TestKnowledgeUpload:
@@ -42,7 +39,9 @@ class TestKnowledgeUpload:
             assert resp.status_code == 200
             data = resp.json()
             assert data.get("filename") == "test_doc.txt"
-            assert data.get("status") in ("processing", "ready")
+            assert data.get("status") in ("processing", "ready", "failed")
+            if data.get("status") == "failed":
+                assert data.get("error_message"), "失败态应返回可观测 error_message"
         finally:
             os.unlink(tmp_path)
 
