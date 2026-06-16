@@ -23,3 +23,12 @@ Pillow>=11.1.0
 openpyxl==3.1.5
 pycasbin>=1.36.0
 casbin-sqlalchemy-adapter>=0.6.0
+# ── MinerU PDF 切图（与 DOCX 共用下游 OCR/VLM/manifest；完整 pipeline 另需 torch 等，见 requirements-mineru.txt）
+loguru>=0.7.2
+beautifulsoup4>=4.12.0
+pypdfium2>=4.30.0
+pypdf>=5.6.0
+boto3>=1.28.43
+reportlab>=4.0.0
+pdftext>=0.6.2
+pdfminer.six>=20250506
