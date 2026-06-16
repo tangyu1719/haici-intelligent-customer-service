@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { authHeaders, hasPerm } from '../api/auth'
 import type { ChatMessageItem, ChatSessionDetail, ChatSessionItem } from '../types'
 import ListPagination from './ListPagination.vue'
@@ -12,6 +13,7 @@ import {
   exportSessionMarkdown,
 } from '../utils/sessionExport'
 
+const route = useRoute()
 const sessionList = ref<ChatSessionItem[]>([])
 const sessionTotal = ref(0)
 const sessionQuery = ref<ListQueryState>(defaultListQuery(20))
@@ -264,6 +266,10 @@ const exportCurrentSession = async (format: 'json' | 'md'): Promise<void> => {
 watch(() => [sessionQuery.value.page, sessionQuery.value.size], loadSessions)
 
 onMounted(async () => {
+  const uid = route.query.user_id
+  if (uid && canViewAll.value) {
+    filterUserId.value = String(uid)
+  }
   await loadPersistInterval()
   await loadSessions()
 })

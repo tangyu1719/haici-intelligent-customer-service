@@ -37,12 +37,14 @@ const S_MAP: Record<string, string> = {
   running: '处理中',
   completed: '已完成',
   failed: '失败',
+  cancelled: '已取消',
 }
 const S_COLOR: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
   running: 'bg-blue-100 text-blue-600',
   completed: 'bg-green-100 text-green-600',
   failed: 'bg-red-100 text-red-600',
+  cancelled: 'bg-orange-100 text-orange-600',
 }
 
 const historyTasks = computed(() =>
@@ -104,9 +106,18 @@ async function openDetail(taskId: string) {
   detailLogs.value = d.task.logs || []
 }
 
-async function deleteTask(taskId: string) {
-  if (!confirm('删除该历史任务记录？')) return
-  await fetch(`/api/v1/multimodal-tasks/${taskId}`, { method: 'DELETE', headers: authHeaders() })
+async function deleteTask(taskId: string, status?: string) {
+  const active = status === 'pending' || status === 'running'
+  const msg = active
+    ? '确定取消并删除该任务？正在处理的文档将停止入库。'
+    : '确定删除该历史任务记录？'
+  if (!confirm(msg)) return
+  const r = await fetch(`/api/v1/multimodal-tasks/${taskId}`, { method: 'DELETE', headers: authHeaders() })
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}))
+    alert(typeof d.detail === 'string' ? d.detail : '删除失败')
+    return
+  }
   if (selectedId.value === taskId) {
     selectedId.value = ''
     detailTask.value = null
@@ -290,7 +301,7 @@ watch(
                 </span>
                 <button
                   class="text-[11px] text-red-500 hover:text-red-700 px-2 py-1 rounded border border-red-200"
-                  @click="deleteTask(detailTask.task_id)"
+                  @click="deleteTask(detailTask.task_id, detailTask.status)"
                 >
                   删除
                 </button>

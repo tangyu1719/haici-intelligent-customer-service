@@ -21,6 +21,20 @@ interface Persona {
   layers: { L0: string; L1: string; L2: string }
 }
 
+interface ExtractionMeta {
+  period_days?: number
+  since_utc?: string
+  sources?: Record<string, string>
+  rules?: { metric: string; rule: string }[]
+  coverage?: {
+    feedback_rate?: number | null
+    intent_eval_rate?: number | null
+    intent_label_coverage?: number | null
+  }
+  demo?: boolean
+  note?: string
+}
+
 interface Analytics {
   period_days: number
   total_feedback: number
@@ -29,8 +43,15 @@ interface Analytics {
   failed_intent_rank: { intent: string; label: string; fail_count: number; total: number }[]
   corrected_intent_rank?: { label: string; count: number }[]
   positive_review_trend: { date: string; count: number }[]
+  rating_distribution?: { rating: number; count: number }[]
   flow_pipeline?: { title?: string; stages: FlowStage[] }
-  summary: { avg_rating: number; intent_like_rate: number | null }
+  data_extraction?: ExtractionMeta
+  summary: {
+    avg_rating: number
+    intent_like_rate: number | null
+    low_rating_count?: number
+    high_rating_count?: number
+  }
   demo_mode?: boolean
   demo_note?: string
 }
@@ -53,6 +74,13 @@ const linePoints = computed(() =>
 
 const flowStages = computed(() => analytics.value?.flow_pipeline?.stages || [])
 const flowTitle = computed(() => analytics.value?.flow_pipeline?.title || '用户反馈处理流程')
+
+const feedbackRatePct = computed(() => {
+  const rate = analytics.value?.data_extraction?.coverage?.feedback_rate
+  return rate != null ? `${(rate * 100).toFixed(1)}%` : null
+})
+
+const extractionRules = computed(() => analytics.value?.data_extraction?.rules?.slice(0, 4) || [])
 
 const loadAnalytics = async (): Promise<void> => {
   loading.value = true
@@ -134,6 +162,10 @@ onMounted(async () => {
         <span v-if="analytics.summary.intent_like_rate != null" class="chip">
           意图准确率 {{ (analytics.summary.intent_like_rate * 100).toFixed(0) }}%
         </span>
+        <span v-if="feedbackRatePct" class="chip">反馈率 {{ feedbackRatePct }}</span>
+        <span v-if="analytics.summary.low_rating_count != null" class="chip chip-warn">
+          低分 {{ analytics.summary.low_rating_count }} 条
+        </span>
       </div>
       <p v-if="analytics?.demo_mode && analytics.demo_note" class="demo-note">{{ analytics.demo_note }}</p>
     </header>
@@ -197,6 +229,14 @@ onMounted(async () => {
         </ol>
       </section>
 
+      <section v-if="analytics?.rating_distribution?.length" class="card chart-card">
+        <h3 class="section-title">满意度 · 星级分布</h3>
+        <SimplePieChart
+          :items="analytics.rating_distribution.map((r) => ({ label: `${r.rating} 星`, value: r.count }))"
+          :size="180"
+        />
+      </section>
+
       <section class="card chart-card span2">
         <h3 class="section-title">AI 回答维度 · 用户好评趋势（4–5 星/日）</h3>
         <SimpleLineChart :points="linePoints" :width="640" color="#f59e0b" />
@@ -256,7 +296,14 @@ onMounted(async () => {
             <li v-if="analytics.failed_intent_rank[0]">
               最高失败意图：{{ analytics.failed_intent_rank[0].label }}
             </li>
+            <li v-if="feedbackRatePct">助手回复反馈率：{{ feedbackRatePct }}</li>
             <li>统计周期：近 {{ analytics.period_days }} 天</li>
+          </ul>
+          <h4 v-if="extractionRules.length" class="digest-subtitle">抽取逻辑</h4>
+          <ul v-if="extractionRules.length" class="digest-list digest-rules">
+            <li v-for="rule in extractionRules" :key="rule.metric">
+              <strong>{{ rule.metric }}</strong>：{{ rule.rule }}
+            </li>
           </ul>
         </aside>
       </div>
@@ -278,6 +325,7 @@ onMounted(async () => {
 .summary-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .chip { font-size: 13px; font-weight: 700; padding: 6px 12px; border-radius: 999px; background: #f3f4f6; color: #1f2937; border: 1px solid #d1d5db; }
 .chip-demo { background: #fff7ed; color: #9a3412; border-color: #fdba74; }
+.chip-warn { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 .demo-note { margin: 10px 0 0; font-size: 12px; color: #92400e; line-height: 1.5; }
 .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .span-full { grid-column: 1 / -1; margin-bottom: 0; }
@@ -349,4 +397,7 @@ onMounted(async () => {
 .md-body :deep(ul), .md-body :deep(ol) { padding-left: 20px; }
 .digest-list { margin: 8px 0 0; padding-left: 18px; font-size: 11px; color: #64748b; line-height: 1.6; }
 .agpz-hist h4 { margin: 0 0 8px; font-size: 12px; font-weight: 800; }
+.digest-subtitle { margin-top: 14px; }
+.digest-rules li { margin-bottom: 6px; }
+.digest-rules strong { color: #b45309; font-weight: 700; }
 </style>

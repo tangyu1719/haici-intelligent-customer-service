@@ -47,12 +47,14 @@ const S_MAP: Record<string, string> = {
   running: '处理中',
   completed: '已完成',
   failed: '失败',
+  cancelled: '已取消',
 }
 const S_COLOR: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
   running: 'bg-blue-100 text-blue-600',
   completed: 'bg-green-100 text-green-600',
   failed: 'bg-red-100 text-red-600',
+  cancelled: 'bg-orange-100 text-orange-600',
 }
 
 const displayName = (name: string) => fixDisplayFilename(name)
@@ -212,9 +214,19 @@ function disconnectSSE() {
   esRef.value?.close()
   esRef.value = null
 }
-async function deleteTask(taskId: string) {
-  if (!confirm('删除该任务记录？')) return
-  await fetch(`/api/v1/multimodal-tasks/${taskId}`, { method: 'DELETE', headers: authHeaders() })
+async function deleteTask(taskId: string, status?: string) {
+  const active = status === 'pending' || status === 'running'
+  const msg = active
+    ? '确定取消并删除该任务？正在处理的文档将停止入库，已产生的中间产物会被清理。'
+    : '确定删除该任务记录？'
+  if (!confirm(msg)) return
+  disconnectSSE()
+  const r = await fetch(`/api/v1/multimodal-tasks/${taskId}`, { method: 'DELETE', headers: authHeaders() })
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}))
+    alert(typeof d.detail === 'string' ? d.detail : '删除失败，请稍后重试')
+    return
+  }
   if (detailTaskId.value === taskId) {
     detailTaskId.value = ''
     detailTask.value = null
@@ -350,11 +362,20 @@ onUnmounted(() => {
               :class="detailTaskId === t.task_id ? 'bg-[#eff6ff]' : 'hover:bg-[#f8fafc]'"
               @click="selectTask(t.task_id)"
             >
-              <div class="flex items-center justify-between mb-1.5">
+              <div class="flex items-center justify-between mb-1.5 gap-2">
                 <span class="text-[12px] font-bold truncate flex-1 mr-2">{{ displayName(t.filename) }}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0" :class="S_COLOR[t.status]">{{
-                  S_MAP[t.status]
-                }}</span>
+                <div class="flex items-center gap-1 shrink-0">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full font-bold" :class="S_COLOR[t.status]">{{
+                    S_MAP[t.status]
+                  }}</span>
+                  <button
+                    class="text-[10px] text-red-400 hover:text-red-600 px-1"
+                    title="取消并删除"
+                    @click.stop="deleteTask(t.task_id, t.status)"
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
               <div class="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-1">
                 <div
@@ -384,8 +405,8 @@ onUnmounted(() => {
                 :class="S_COLOR[detailTask.status]"
                 >{{ S_MAP[detailTask.status] }}</span
               >
-              <button class="text-[10px] text-red-400 hover:text-red-600" @click="deleteTask(detailTask.task_id)">
-                删除
+              <button class="text-[10px] text-red-400 hover:text-red-600" @click="deleteTask(detailTask.task_id, detailTask.status)">
+                {{ detailTask.status === 'running' || detailTask.status === 'pending' ? '取消' : '删除' }}
               </button>
             </div>
             <div class="px-4 py-3 shrink-0">
@@ -395,6 +416,8 @@ onUnmounted(() => {
                   :class="
                     detailTask.status === 'failed'
                       ? 'bg-red-400'
+                      : detailTask.status === 'cancelled'
+                        ? 'bg-orange-400'
                       : detailTask.status === 'completed'
                         ? 'bg-green-400'
                         : 'bg-blue-400'

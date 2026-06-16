@@ -4,6 +4,8 @@ import { authHeaders } from '../api/auth'
 import ListPagination from './ListPagination.vue'
 import { defaultListQuery, toSearchParams, type ListQueryState } from '../utils/listQuery'
 
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 interface PermItem { key: string; label: string }
 interface ModulePerms { module_key: string; label: string; description: string; perms: PermItem[] }
 interface RoleItem { id: number; code: string; name: string }
@@ -98,9 +100,9 @@ onMounted(loadAll)
 </script>
 
 <template>
-  <div class="flex-1 p-6 overflow-y-auto">
-    <div class="max-w-6xl mx-auto">
-      <div class="flex items-center justify-between mb-4">
+  <div :class="embedded ? '' : 'flex-1 p-6 overflow-y-auto'">
+    <div :class="embedded ? '' : 'max-w-6xl mx-auto'">
+      <div v-if="!embedded" class="flex items-center justify-between mb-4">
         <div>
           <h2 class="text-lg font-black">角色权限配置</h2>
           <p class="text-[11px] text-[#64748b]">
@@ -109,6 +111,7 @@ onMounted(loadAll)
         </div>
         <span v-if="msg" class="text-[12px] font-bold" :class="msg.includes('失败') ? 'text-red-500' : 'text-green-600'">{{ msg }}</span>
       </div>
+      <p v-else-if="msg" class="text-[12px] font-bold mb-2" :class="msg.includes('失败') ? 'text-red-500' : 'text-green-600'">{{ msg }}</p>
 
       <div class="grid grid-cols-3 gap-4">
         <!-- 左侧：角色列表（分页 + 搜索） -->
