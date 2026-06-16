@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# HaiChi 服务管理公共库（Linux / macOS 生产级）
+﻿#!/usr/bin/env bash
+# HaiCi 服务管理公共库（Linux / macOS 生产级）
 # 被 start.sh / stop.sh / restart.sh source 使用，请勿直接执行。
 
 set -euo pipefail
@@ -399,7 +399,7 @@ stop_app_processes() {
 
 show_service_status() {
   echo ""
-  echo "========== HaiChi 服务状态 (mode=${HAICI_DEPLOY_MODE}) =========="
+  echo "========== HaiCi 服务状态 (mode=${HAICI_DEPLOY_MODE}) =========="
   local item name port pid
   for item in "MySQL:${HAICI_MYSQL_PORT}" "Chroma:${HAICI_CHROMA_PORT}" "Backend:${HAICI_BACKEND_PORT}" "Frontend:${HAICI_FRONTEND_PORT}"; do
     name="${item%%:*}"
@@ -445,7 +445,7 @@ parse_common_flags() {
       --rebuild-frontend) REBUILD_FRONTEND=true ;;
       -h|--help)
         cat <<'EOF'
-HaiChi 服务管理通用参数:
+HaiCi 服务管理通用参数:
   --skip-docker       跳过 Docker 中间件启停
   --skip-backend      跳过后端
   --skip-frontend     跳过前端（dev 模式）

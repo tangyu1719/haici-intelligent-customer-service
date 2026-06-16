@@ -1,4 +1,4 @@
-# Stop all HaiChi services: frontend + backend + Docker
+﻿# Stop all HaiCi services: frontend + backend + Docker
 param(
     [switch]$SkipDocker,
     [switch]$KeepDocker
@@ -6,7 +6,7 @@ param(
 
 . "$PSScriptRoot\_lib.ps1"
 
-Write-Host '>>> HaiChi stop all services' -ForegroundColor White
+Write-Host '>>> HaiCi stop all services' -ForegroundColor White
 
 Stop-AppProcesses
 

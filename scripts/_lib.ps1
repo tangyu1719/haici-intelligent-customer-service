@@ -1,4 +1,4 @@
-# HaiChi service helpers (Windows PowerShell)
+﻿# HaiCi service helpers (Windows PowerShell)
 $ErrorActionPreference = 'Stop'
 
 $script:ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -246,7 +246,7 @@ function Stop-AppProcesses {
 
 function Show-ServiceStatus {
     Write-Host ''
-    Write-Host '========== HaiChi Service Status ==========' -ForegroundColor White
+    Write-Host '========== HaiCi Service Status ==========' -ForegroundColor White
     foreach ($item in @(
         @{ Name = 'MySQL'; Port = $MysqlPort },
         @{ Name = 'Chroma'; Port = $ChromaPort },

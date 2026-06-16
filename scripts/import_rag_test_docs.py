@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """将 RAG测试文档 目录批量导入知识库（需后端已启动）。"""
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def upload_one(base: str, token: str, path: Path, slice_method: str = "") -> dic
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="导入 RAG测试文档 到 HaiChi 知识库")
+    parser = argparse.ArgumentParser(description="导入 RAG测试文档 到 HaiCi 知识库")
     parser.add_argument("--base", default=DEFAULT_BASE, help="后端根地址")
     parser.add_argument("--docs", default=str(DEFAULT_DOCS), help="文档目录")
     parser.add_argument("--username", default="admin")

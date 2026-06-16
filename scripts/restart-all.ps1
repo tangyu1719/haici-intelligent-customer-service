@@ -1,4 +1,4 @@
-# Restart all HaiChi services
+﻿# Restart all HaiCi services
 param(
     [switch]$SkipDocker,
     [switch]$KeepDocker
@@ -6,7 +6,7 @@ param(
 
 . "$PSScriptRoot\_lib.ps1"
 
-Write-Host '>>> HaiChi restart all services' -ForegroundColor White
+Write-Host '>>> HaiCi restart all services' -ForegroundColor White
 
 Stop-AppProcesses
 if (-not $SkipDocker -and -not $KeepDocker) {

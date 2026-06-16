@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# HaiChi 一键重启（生产级）
+﻿#!/usr/bin/env bash
+# HaiCi 一键重启（生产级）
 # 用法: ./scripts/restart.sh [--prod|--dev] [--keep-docker] [--skip-docker] [--rebuild-frontend]
 
 set -euo pipefail
@@ -14,7 +14,7 @@ main() {
   acquire_service_lock
   trap 'release_service_lock' EXIT
 
-  log_info ">>> HaiChi 重启服务 (mode=${HAICI_DEPLOY_MODE})"
+  log_info ">>> HaiCi 重启服务 (mode=${HAICI_DEPLOY_MODE})"
 
   stop_app_processes
   sleep 2

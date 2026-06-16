@@ -488,7 +488,7 @@ onUnmounted(() => {
               <code class="text-[10px] bg-[#f1f5f9] px-1.5 py-0.5 rounded ml-1">{{ detailTask.output_dir }}</code>
             </div>
             <div
-              v-if="detailTask.status === 'completed'"
+              v-if="detailTask.status === 'completed' || detailTask.output_md"
               class="px-4 py-2 border-b text-[11px] shrink-0 flex flex-wrap items-center gap-2"
             >
               <span class="font-bold text-[#64748b]">导出格式:</span>
@@ -500,6 +500,7 @@ onUnmounted(() => {
                 <option value="txt">纯文本 (.txt)</option>
               </select>
               <button
+                v-if="detailTask.status === 'completed' || detailTask.output_md"
                 class="text-[11px] px-3 py-1 rounded bg-[#2563eb] text-white font-bold hover:bg-[#1d4ed8]"
                 @click="downloadExport(detailTask.task_id, detailTask.filename)"
               >

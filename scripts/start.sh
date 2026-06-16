@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# HaiChi 一键启动（生产级）
+﻿#!/usr/bin/env bash
+# HaiCi 一键启动（生产级）
 # 用法: ./scripts/start.sh [--prod|--dev] [--skip-docker] [--skip-backend] [--skip-frontend] [--rebuild-frontend]
 
 set -euo pipefail
@@ -14,7 +14,7 @@ main() {
   acquire_service_lock
   trap 'release_service_lock' EXIT
 
-  log_info ">>> HaiChi 启动服务 (mode=${HAICI_DEPLOY_MODE})"
+  log_info ">>> HaiCi 启动服务 (mode=${HAICI_DEPLOY_MODE})"
 
   if [[ "${SKIP_DOCKER}" != "true" ]]; then
     start_docker_middleware || true

@@ -192,7 +192,7 @@ body {
   }
 }
 
-/* 对话 Markdown 正文（对齐 web_rebuild chat-prose） */
+/* 对话 Markdown 正文 */
 .chat-prose {
   font-family: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
   font-size: 14px;
@@ -642,7 +642,7 @@ body {
   text-underline-offset: 2px;
 }
 
-/* RAG 文献切片 / 注释折叠面板（对齐 web_rebuild） */
+/* RAG 文献切片 / 注释折叠面板 */
 .web-search-panel {
   border: 1px solid rgba(59, 130, 246, 0.28);
   background: linear-gradient(180deg, #ffffff, #f8fafc);
@@ -1397,7 +1397,7 @@ body {
   background: #fef2f2;
 }
 
-/* 对话多模态输入（对齐 web_rebuild input-row / upload-preview） */
+/* 对话多模态输入 */
 .chat-upload-preview {
   display: flex;
   flex-wrap: wrap;

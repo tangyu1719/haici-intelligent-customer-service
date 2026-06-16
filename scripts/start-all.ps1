@@ -1,4 +1,4 @@
-# Start all HaiChi services: Docker + backend + frontend
+﻿# Start all HaiCi services: Docker + backend + frontend
 param(
     [switch]$SkipDocker,
     [switch]$SkipFrontend,
@@ -7,7 +7,7 @@ param(
 
 . "$PSScriptRoot\_lib.ps1"
 
-Write-Host '>>> HaiChi start all services' -ForegroundColor White
+Write-Host '>>> HaiCi start all services' -ForegroundColor White
 
 if (-not $SkipDocker) {
     Start-DockerMiddleware | Out-Null

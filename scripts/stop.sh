@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-# HaiChi 一键停止（生产级：SIGTERM 优雅退出 + 端口兜底）
+﻿#!/usr/bin/env bash
+# HaiCi 一键停止（生产级：SIGTERM 优雅退出 + 端口兜底）
 # 用法: ./scripts/stop.sh [--keep-docker] [--skip-docker]
 
 set -euo pipefail
@@ -14,7 +14,7 @@ main() {
   acquire_service_lock
   trap 'release_service_lock' EXIT
 
-  log_info ">>> HaiChi 停止服务"
+  log_info ">>> HaiCi 停止服务"
 
   stop_app_processes
 
