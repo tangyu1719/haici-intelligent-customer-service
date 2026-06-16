@@ -2,6 +2,8 @@ import hashlib
 
 import logging
 
+from pathlib import Path
+
 from typing import List
 
 
@@ -40,13 +42,14 @@ def get_client():
 
         import chromadb
 
-
-
         try:
-
-            _client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
-
-            _client.heartbeat()
+            persist = (settings.CHROMA_PERSIST_PATH or "").strip()
+            if persist:
+                Path(persist).mkdir(parents=True, exist_ok=True)
+                _client = chromadb.PersistentClient(path=persist)
+            else:
+                _client = chromadb.HttpClient(host=settings.CHROMA_HOST, port=settings.CHROMA_PORT)
+                _client.heartbeat()
 
         except Exception as exc:
 
@@ -155,16 +158,30 @@ def add_documents(docs: List[Document], tenant_id: str = "default"):
 
 
 def delete_by_document(document_id: int, tenant_id: str = "default"):
-
-    collection = get_collection()
-
+    """按 document_id 删除向量分块；Chroma 不可用时不阻断 MySQL 侧删除。"""
     try:
-
-        collection.delete(where={"$and": [{"tenant_id": tenant_id}, {"document_id": document_id}]})
-
+        collection = get_collection()
     except Exception as exc:
+        logger.warning(
+            "[智能客服-知识库|vectorstore|Chroma|硬编执行|删除] 向量库不可用，跳过向量清理; doc_id=%s; error_type=%s; error_message=%s",
+            document_id,
+            type(exc).__name__,
+            str(exc)[:200],
+        )
+        return
 
-        logger.warning("[智能客服-知识库|vectorstore|Chroma|硬编执行|删除] 失败; doc_id=%s; error=%s", document_id, exc)
+    tid = str(tenant_id)
+    # Chroma 元数据类型可能为 int 或 str，两种都尝试
+    for doc_id_val in (document_id, str(document_id)):
+        try:
+            collection.delete(where={"$and": [{"tenant_id": tid}, {"document_id": doc_id_val}]})
+        except Exception as exc:
+            logger.warning(
+                "[智能客服-知识库|vectorstore|Chroma|硬编执行|删除] 失败; doc_id=%s; meta_type=%s; error=%s",
+                document_id,
+                type(doc_id_val).__name__,
+                exc,
+            )
 
 
 

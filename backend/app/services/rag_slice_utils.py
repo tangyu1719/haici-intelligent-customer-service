@@ -75,14 +75,14 @@ def picture_answer_rules() -> str:
     return _build()
 
 
-def _citation_format_block() -> str:
-    """完整引用格式指令块。
+def _citation_format_block(*, fast: bool = True) -> str:
+    """完整/轻量引用格式指令块。"""
+    from app.services.prompt_segments import (
+        build_citation_format_block as _full,
+        build_citation_format_fast_block as _fast,
+    )
 
-    段式指令变量来自 prompt_segments.build_citation_format_block()。
-    """
-    from app.services.prompt_segments import build_citation_format_block as _build
-
-    return _build()
+    return _fast() if fast else _full()
 
 
 def build_rag_llm_blocks(
@@ -90,8 +90,9 @@ def build_rag_llm_blocks(
     *,
     prefetch_error: str = "",
     rag_query: str = "",
+    fast_cite: bool = True,
 ) -> tuple[str, str]:
-    cite_lines = [_citation_format_block()]
+    cite_lines = [_citation_format_block(fast=fast_cite)]
     slices = [s for s in (rag_slices or []) if isinstance(s, dict) and s.get("content")]
     if not slices:
         ctx = "编排段知识库预检索：未命中切片。"
