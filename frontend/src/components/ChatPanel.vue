@@ -90,7 +90,11 @@ const applyStreamDraftIfAny = (sid: number): void => {
 const messages = ref<ChatMessage[]>([])
 const inputText = ref('')
 const isWaiting = ref(false)
+/** 后台轮询补全回答，不应阻塞侧栏切换/删除 */
+const isPollingSession = ref(false)
 let activeStreamAssistant: ChatMessage | null = null
+let streamAbortController: AbortController | null = null
+let switchSessionToken = 0
 const sessionId = ref<number | null>(null)
 let persistTimer: ReturnType<typeof setInterval> | null = null
 let persistIntervalMinutes = 10
@@ -153,7 +157,9 @@ const canSend = computed(() => {
 
 /** 已有流式助手气泡时不重复显示底部 wave-loader */
 const showStreamWaiting = computed(
-  () => isWaiting.value && !messages.value.some((m) => m.role === 'assistant' && m.isStreaming),
+  () =>
+    (isWaiting.value || isPollingSession.value)
+    && !messages.value.some((m) => m.role === 'assistant' && m.isStreaming),
 )
 
 const fmtDateShort = (s?: string): string => {
@@ -327,6 +333,21 @@ const stopSessionPoll = (): void => {
     clearInterval(sessionPollTimer)
     sessionPollTimer = null
   }
+  isPollingSession.value = false
+}
+
+/** 切换/删除会话时取消进行中的流式与轮询，避免侧栏被 isWaiting 锁死 */
+const cancelOngoingChat = (): void => {
+  if (streamAbortController) {
+    streamAbortController.abort()
+    streamAbortController = null
+  }
+  stopSessionPoll()
+  isWaiting.value = false
+  if (activeStreamAssistant) {
+    activeStreamAssistant.isStreaming = false
+    activeStreamAssistant = null
+  }
 }
 
 const sessionNeedsPoll = (sid: number): boolean => {
@@ -339,16 +360,19 @@ const sessionNeedsPoll = (sid: number): boolean => {
 /** 后台仍在生成时轮询 DB，刷新/切页回来后自动补全回答 */
 const pollSessionUntilReady = (sid: number): void => {
   stopSessionPoll()
-  if (!sessionNeedsPoll(sid)) return
-  isWaiting.value = true
+  if (!sessionNeedsPoll(sid) || sessionId.value !== sid) return
+  isPollingSession.value = true
   let attempts = 0
   sessionPollTimer = setInterval(async () => {
+    if (sessionId.value !== sid) {
+      stopSessionPoll()
+      return
+    }
     attempts += 1
     await loadSessionMessages(sid)
     await loadChatSessions()
-    if (!sessionNeedsPoll(sid) || attempts >= 45) {
+    if (!sessionNeedsPoll(sid) || attempts >= 45 || sessionId.value !== sid) {
       stopSessionPoll()
-      isWaiting.value = false
       scrollToBottom()
     }
   }, 2000)
@@ -367,15 +391,26 @@ const mapHistoryMessages = (rows: { role: string; content: string; intent_label?
       messageId: m.id,
       createdAt: m.created_at,
       isStreaming: false,
+      followUps: [],
     }
     if (msg.role === 'assistant') hydrateMsgCitations(msg)
     return msg
   })
 
+/** 规范化 SSE 追问建议并写入助手消息 */
+const applyFollowUps = (bot: ChatMessage, items: unknown): void => {
+  const normalized = (Array.isArray(items) ? items : [])
+    .map((x) => String(x).trim())
+    .filter((x) => x.length > 0)
+    .slice(0, 3)
+  if (normalized.length) bot.followUps = normalized
+}
+
 const switchSession = async (id: number): Promise<void> => {
-  if (isWaiting.value) return
+  if (sessionId.value === id) return
+  cancelOngoingChat()
   speechInput.stop()
-  stopSessionPoll()
+  const token = ++switchSessionToken
   const prev = sessionId.value
   if (prev && prev !== id) {
     void syncSessionToDb(prev, 'switch')
@@ -383,6 +418,7 @@ const switchSession = async (id: number): Promise<void> => {
   sessionId.value = id
   saveLastSession(id)
   await loadSessionMessages(id)
+  if (token !== switchSessionToken) return
   pollSessionUntilReady(id)
   restartPersistTimer()
 }
@@ -428,10 +464,11 @@ const loadPersistInterval = async (): Promise<void> => {
 }
 
 const newSession = async (): Promise<void> => {
-  if (isWaiting.value) return
+  cancelOngoingChat()
   speechInput.stop()
-  stopSessionPoll()
-  isWaiting.value = false
+  switchSessionToken += 1
+  const prev = sessionId.value
+  if (prev) void syncSessionToDb(prev, 'switch')
   const res = await fetch('/api/v1/sessions', { method: 'POST', headers: authHeaders() })
   if (!res.ok) return
   const data = await res.json()
@@ -472,15 +509,17 @@ const saveEditSession = async (id: number): Promise<void> => {
 
 const archiveSession = async (id: number, e: Event): Promise<void> => {
   e.stopPropagation()
-  if (isWaiting.value || !window.confirm('确定删除该会话？删除后将从您的列表中隐藏，管理员仍可在「会话审计」中查看完整记录。')) return
+  if (!window.confirm('确定删除该会话？删除后将从您的列表中隐藏，管理员仍可在「会话审计」中查看完整记录。')) return
+  if (sessionId.value === id) {
+    cancelOngoingChat()
+    switchSessionToken += 1
+    sessionId.value = null
+    messages.value = []
+  }
   const res = await fetch(`/api/v1/sessions/${id}`, { method: 'DELETE', headers: authHeaders() })
   if (!res.ok) {
     window.alert('删除失败，请稍后重试')
     return
-  }
-  if (sessionId.value === id) {
-    sessionId.value = null
-    messages.value = []
   }
   await loadChatSessions()
   if (!sessionId.value && chatSessions.value.length) {
@@ -639,8 +678,11 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
         thinkCollapsed: false,
         phaseStatus: '',
         retrievalCount: 0,
+        reactSteps: [],
+        reactMode: false,
         messageId: null,
         isStreaming: true,
+        followUps: [],
       } as ChatMessage)
       messages.value.push(streamAssistantMsg)
       activeStreamAssistant = streamAssistantMsg
@@ -744,10 +786,14 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
   starter.phaseStatus = '正在理解…'
   starter.content = ''
 
+  streamAbortController = new AbortController()
+  const streamSid = sessionId.value
+  const streamSignal = streamAbortController.signal
   try {
     const res = await fetch('/api/v1/chat/stream', {
       method: 'POST',
       cache: 'no-store',
+      signal: streamSignal,
       headers: {
         ...authHeaders(),
         Accept: 'text/event-stream',
@@ -805,6 +851,8 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
             bot.phaseStatus = ''
           } else if (phase === 'generating') {
             bot.phaseStatus = ''
+          } else if (phase === 'follow_ups') {
+            bot.phaseStatus = data.text || '正在生成追问建议…'
           } else if (!bot.ragPrefetchSlices?.length && !(bot.content || '').trim()) {
             bot.phaseStatus = data.text || ''
           }
@@ -816,6 +864,33 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           bot.llmNodeName = data.llm_node_name
           bot.llmModel = data.llm_model
           if (data.pipeline) bot.pipeline = data.pipeline
+          if (data.react_mode) bot.reactMode = true
+        }
+        if (event === 'react_step') {
+          bot.reactMode = true
+          if (!bot.reactSteps) bot.reactSteps = []
+          const stepNum = Number(data.step || 0)
+          const phase = String(data.phase || 'thought') as 'thought' | 'act' | 'observe'
+          let stepRec = bot.reactSteps.find((s) => s.step === stepNum && s.phase === phase)
+          if (!stepRec) {
+            stepRec = { step: stepNum, phase, content: '', streaming: Boolean(data.streaming) }
+            if (data.tool) stepRec.tool = String(data.tool)
+            if (data.tool_query) stepRec.toolQuery = String(data.tool_query)
+            bot.reactSteps.push(stepRec)
+          }
+          if (phase === 'thought' && data.kind === 'think' && data.content) {
+            appendThinkToken(bot, data.content)
+          } else if (data.streaming && data.content) {
+            stepRec.content = (stepRec.content || '') + String(data.content)
+            stepRec.streaming = true
+          }
+          if (data.done) {
+            stepRec.content = String(data.content || stepRec.content || '')
+            stepRec.streaming = false
+            if (data.slice_count != null) stepRec.sliceCount = Number(data.slice_count)
+          }
+          if (data.tool_query) stepRec.toolQuery = String(data.tool_query)
+          scrollToBottom()
         }
         if (event === 'intent') {
           bot.intent = data.intent || bot.intent
@@ -840,10 +915,7 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           scrollToBottom()
         }
         if (event === 'follow_ups') {
-          const items = data.items
-          bot.followUps = Array.isArray(items)
-            ? items.map((x: unknown) => String(x).trim()).filter((x: string) => x.length > 0).slice(0, 3)
-            : []
+          applyFollowUps(bot, data.items)
           scrollToBottom()
         }
         if (event === 'done') {
@@ -854,6 +926,8 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           if (bot.thinkContent) bot.thinkCollapsed = true
           bot.phaseStatus = ''
           bot.messageId = data.assistant_message_id
+          applyFollowUps(bot, data.follow_ups ?? data.items)
+          bot.isStreaming = false
           const finalText = String(data.content || '').trim()
           if (finalText && (!bot.content || bot.content.startsWith('正在'))) {
             bot.content = finalText
@@ -861,11 +935,15 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
             bot.content = finalText
           }
           clearStreamDraft(sessionId.value)
+          scrollToBottom()
         }
       }
     }
-    await loadChatSessions()
-  } catch {
+    if (sessionId.value === streamSid) {
+      await loadChatSessions()
+    }
+  } catch (e) {
+    if (streamSignal.aborted || sessionId.value !== streamSid) return
     const bot = ensureAssistant()
     if (!streamDone && (bot.content || '').trim() && !(bot.content || '').startsWith('正在')) {
       bot.streamInterrupted = true
@@ -874,6 +952,10 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
       bot.content = '网络连接异常，请检查后端服务。'
     }
   } finally {
+    if (streamAbortController?.signal === streamSignal) {
+      streamAbortController = null
+    }
+    if (sessionId.value !== streamSid) return
     flushPendingThink(true)
     flushPendingTokens(true)
     if (streamAssistantMsg) {
@@ -889,8 +971,8 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
     activeStreamAssistant = null
     scrollToBottom()
     void loadChatConfig()
-    if (sessionId.value && sessionNeedsPoll(sessionId.value)) {
-      pollSessionUntilReady(sessionId.value)
+    if (streamSid != null && sessionId.value === streamSid && sessionNeedsPoll(streamSid)) {
+      pollSessionUntilReady(streamSid)
     }
   }
 }
@@ -994,7 +1076,7 @@ const regenerateReply = (userQuestion: string): void => {
 watch(() => [sessionQuery.value.page, sessionQuery.value.size], loadChatSessions)
 
 onBeforeUnmount(() => {
-  stopSessionPoll()
+  cancelOngoingChat()
   stopPersistTimer()
   if (sessionId.value) void syncSessionToDb(sessionId.value, 'exit')
   if (isWaiting.value && activeStreamAssistant && sessionId.value) {

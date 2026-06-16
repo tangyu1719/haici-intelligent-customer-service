@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { authHeaders } from '../api/auth'
-import type { ChatMessage, FeedbackSubmitPayload, IntentAlternativesResponse } from '../types'
+import type { ChatMessage, FeedbackSubmitPayload, IntentAlternativesResponse, ReactStep } from '../types'
 import { INTENT_LABELS, intentDisplay } from '../utils/intentLabels'
 import { handleKbPictureClick } from '../utils/kbPictureActions'
 import {
@@ -83,6 +83,12 @@ const thinkPanelSummary = computed(() => {
   const oneLine = raw.replace(/\s+/g, ' ').slice(0, 72)
   return oneLine.length < raw.length ? `${oneLine}…` : oneLine
 })
+
+const reactPhaseLabel = (phase: ReactStep['phase']): string => {
+  if (phase === 'thought') return '思考'
+  if (phase === 'act') return '行动'
+  return '观察'
+}
 
 const annotations = computed(() => ragCitationAnnotationsForMsg(props.msg))
 
@@ -618,6 +624,23 @@ const scrollToFeedback = (): void => {
               <span v-if="sl.score != null" class="rag-cite-score">score {{ Number(sl.score).toFixed(4) }}</span>
             </li>
           </ol>
+        </div>
+      </div>
+
+      <div v-if="msg.reactMode && msg.reactSteps?.length" class="react-steps-panel">
+        <div class="react-steps-head">ReAct 推理 · {{ msg.reactSteps.length }} 步</div>
+        <div
+          v-for="(rs, idx) in msg.reactSteps"
+          :key="'react-' + rs.step + '-' + rs.phase + '-' + idx"
+          class="react-step-item"
+          :class="'react-step--' + rs.phase"
+        >
+          <span class="react-step-badge">{{ reactPhaseLabel(rs.phase) }} #{{ rs.step }}</span>
+          <span v-if="rs.tool" class="react-step-tool">{{ rs.tool }}</span>
+          <span v-if="rs.toolQuery" class="react-step-query">「{{ rs.toolQuery }}」</span>
+          <span v-if="rs.sliceCount != null" class="react-step-meta">{{ rs.sliceCount }} 片段</span>
+          <pre v-if="rs.content" class="react-step-body">{{ rs.content }}</pre>
+          <span v-if="rs.streaming" class="react-step-live">…</span>
         </div>
       </div>
 
@@ -1205,6 +1228,65 @@ const scrollToFeedback = (): void => {
   background: #15803d;
   opacity: 1;
   cursor: default;
+}
+
+/* ReAct 推理步骤 */
+.react-steps-panel {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+}
+.react-steps-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4338ca;
+  margin-bottom: 8px;
+}
+.react-step-item {
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #fff;
+  border-left: 3px solid #6366f1;
+}
+.react-step--act { border-left-color: #059669; }
+.react-step--observe { border-left-color: #d97706; }
+.react-step-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4338ca;
+  margin-right: 6px;
+}
+.react-step-tool {
+  font-size: 10px;
+  color: #059669;
+  font-family: monospace;
+}
+.react-step-query {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: 4px;
+}
+.react-step-meta {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-left: 6px;
+}
+.react-step-body {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #334155;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.react-step-live {
+  color: #6366f1;
+  animation: pulse 1s infinite;
 }
 
 /* 长消息展开/收起 */
