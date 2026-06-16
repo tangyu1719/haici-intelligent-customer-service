@@ -115,6 +115,20 @@ CNSTR_CONCISE_CHINESE = PromptSegment(
     purpose="统一回答输出为简体中文，保持简洁不啰嗦",
 )
 
+CNSTR_RAG_STREAM_BRIEF = PromptSegment(
+    key="CNSTR_RAG_STREAM_BRIEF",
+    text=(
+        "只回答与用户当前问题直接相关的内容，不要展开无关场景；"
+        "正文控制在 350 字以内，步骤用简短条目；"
+        "不要输出完整 SQL/代码块/反引号语句，改用「查条码履历表、查库存表」等口语化步骤；"
+        "优先给出 3 条以内排查步骤，不要铺垫长段背景；"
+        "句末用 [1][2] 标注引用编号即可，禁止输出「文献切片明细」「注释」「引用文献」等附录节；"
+        "禁止用 Markdown 标题或 ![](url) 插图；与问题直接相关的界面截图须按下方 picture 块规则输出，由前端渲染。"
+    ),
+    desc="流式问答简洁输出约束",
+    purpose="控制首轮流式回答长度与时延，文献详情由前端 citations 面板展示",
+)
+
 CNSTR_SELF_INTRO_SCOPE = PromptSegment(
     key="CNSTR_SELF_INTRO_SCOPE",
     text="可介绍自己的身份与能力（产品咨询、售后政策、知识库问答）。",
@@ -153,7 +167,12 @@ PREPROC_TASK_DESC = PromptSegment(
 
 PREPROC_INTENT_FIELD = PromptSegment(
     key="PREPROC_INTENT_FIELD",
-    text="intent 取值 product_consult|after_sale|chitchat|complaint；",
+    text=(
+        "intent 取值 product_consult|after_sale|chitchat|complaint；"
+        "chitchat 仅限纯寒暄/致谢/告别等无任何业务或技术诉求的短句（不检索知识库）；"
+        "凡涉及产品、售后、库存、故障、编号、操作步骤、原因排查等业务或技术内容，"
+        "即使知识库可能无答案，也禁止标 chitchat，应标 product_consult 或 after_sale；"
+    ),
     desc="意图字段定义",
     purpose="定义 intent 字段的合法枚举值，确保 LLM 输出的意图能被下游路由识别",
 )
@@ -221,6 +240,14 @@ CITE_HEADER = PromptSegment(
     desc="引用格式总标题",
     purpose="告知 LLM 整个回答需要遵循引用格式规范，起醒目锚定作用",
 )
+
+CITE_BODY_FAST = PromptSegment(
+    key="CITE_BODY_FAST",
+    text="正文中依据知识库写出的每句论断，句末用阿拉伯数字标注引用，如 ……[1] 或 ……1。",
+    desc="流式问答轻量句末引用",
+    purpose="仅要求句末编号，避免触发完整附录格式导致超长生成",
+)
+
 
 CITE_BODY_RULES = PromptSegment(
     key="CITE_BODY_RULES",
@@ -512,6 +539,17 @@ def build_chitchat_system_prompt() -> str:
         CNSTR_NO_SPECULATION.text,
     ]
     return "".join(segments)
+
+
+def build_citation_format_fast_block() -> str:
+    """流式问答轻量引用：句末编号 + picture 块规则；文献附录由前端 citations 面板展示。"""
+    return "\n".join([
+        "【回答格式 · 简洁引用】",
+        CITE_BODY_FAST.text,
+        CNSTR_RAG_STREAM_BRIEF.text,
+        CITE_NO_FABRICATION.text,
+        build_picture_answer_rules(),
+    ])
 
 
 def build_citation_format_block() -> str:
