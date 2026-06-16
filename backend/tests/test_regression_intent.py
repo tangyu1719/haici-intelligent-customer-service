@@ -52,6 +52,46 @@ class TestIntentRecognizer:
         result = recognizer.recognize("我要投诉你们客服太慢了")
         assert result.intent == IntentType.COMPLAINT
 
+    def test_inventory_code_not_chitchat(self):
+        """含业务编号+库存排查的问句不得标 chitchat"""
+        from app.intent import IntentRecognizer, IntentType
+
+        recognizer = IntentRecognizer()
+        result = recognizer.recognize("61K69是不是占用库存导致的?")
+        assert result.intent != IntentType.CHITCHAT
+        assert result.intent == IntentType.PRODUCT
+
+    def test_stock_query_not_chitchat(self):
+        """库存查询不得标 chitchat"""
+        from app.intent import IntentRecognizer, IntentType
+
+        recognizer = IntentRecognizer()
+        result = recognizer.recognize("帮我查一下P001的库存")
+        assert result.intent != IntentType.CHITCHAT
+
+    def test_short_question_mark_not_chitchat_with_business(self):
+        """短问句含「是不是」但有业务词时不得因语气词误判闲聊"""
+        from app.intent import IntentRecognizer, IntentType, has_business_or_technical_signal
+
+        q = "61K69是不是占用库存导致的?"
+        assert has_business_or_technical_signal(q)
+        result = IntentRecognizer().recognize(q)
+        assert result.intent != IntentType.CHITCHAT
+
+
+class TestIntentPipelineCoerce:
+    """TC-INTENT-003: Pipeline 层 chitchat 纠正"""
+
+    def test_coerce_chitchat_to_product_when_business_signal(self):
+        from app.services.agent_pipeline import _coerce_intent
+
+        assert _coerce_intent("chitchat", "61K69是不是占用库存导致的?", "product_consult") == "product_consult"
+
+    def test_keep_chitchat_for_greeting(self):
+        from app.services.agent_pipeline import _coerce_intent
+
+        assert _coerce_intent("chitchat", "你好", "product_consult") == "chitchat"
+
 
 class TestIntentLabels:
     """TC-INTENT-002: 意图标签映射"""
