@@ -1,4 +1,4 @@
-"""减重版 RAG：粗筛大池 → BM25+向量精筛 → 自适应梯度 Top-K → 防稀释。"""
+﻿"""RAG 检索：粗筛大池 → BM25+向量精筛 → 自适应梯度 Top-K → 防稀释。"""
 
 import logging
 from typing import Dict, List

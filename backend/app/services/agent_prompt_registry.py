@@ -1,4 +1,4 @@
-"""Agent Prompt 注册表：对齐 web_rebuild Agent 配置（routing + AGENT.md 模板）。
+﻿"""Agent Prompt 注册表：Agent 配置（routing + AGENT.md 模板）。
 
 加载优先级（高 → 低）：
 1. backend/data/agent_config.json 中的 agent_prompts 覆盖
@@ -318,7 +318,7 @@ AGENT_CATALOG: dict[str, dict[str, Any]] = {
         "variables": ["question", "context", "history"],
         "hint": "预留：统一问答编排 Prompt（当前主链路尚未挂载）",
         "guide": _guide(
-            role="设计意图：作为问答总编排 Agent，负责问题理解、检索调度与答案组织（对标 web_rebuild 同名 Agent）。",
+            role="设计意图：作为问答总编排 Agent，负责问题理解、检索调度与答案组织（问答总编排 Agent）。",
             pipeline="用户提问 →（规划）本 Agent → RAG/工具 → 最终回答",
             trigger="**当前版本未接入**：实际问答走 agent_pipeline.py 内硬编码预处理 Prompt + RAG，不读取本模板。",
             impact="保存后**不影响现网对话**；若未来接入，将直接影响每次问答的检索词与回答结构。",

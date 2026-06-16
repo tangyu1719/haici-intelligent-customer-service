@@ -14,6 +14,7 @@ from app.services.multimodal_task_manager import (
     add_log,
     clear_cancel_flag,
     fail_stage,
+    get_task,
     update_task,
 )
 
@@ -90,7 +91,8 @@ def run_ingest_in_background(
                     db.commit()
             except Exception:
                 db.rollback()
-            fail_stage(task_id, "normalize", err[:300])
+            if task_id and not (get_task(task_id) or {}).get("error"):
+                fail_stage(task_id, "vectorize", err[:2000])
         finally:
             clear_cancel_flag(task_id)
             db.close()

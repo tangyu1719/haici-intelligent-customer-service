@@ -1,4 +1,4 @@
-"""知识库文档读取与分块；复杂格式走 DocumentProcessor / MinerU。"""
+﻿"""知识库文档读取与分块；复杂格式走 DocumentProcessor / MinerU。"""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ def split_to_documents(
     max_tokens: int | None = None,
     dynamic_max_chars: int | None = None,
 ):
-    """按 web_rebuild 对齐的全量切割策略分块并转为 LangChain Document。"""
+    """按配置的全量切割策略分块并转为 LangChain Document。"""
     from app.config import settings
     from app.services.kb_chunk_service import split_to_documents as _split
 
@@ -196,7 +196,7 @@ def ingest_uploaded_document(
 
             t = get_task(task_id) or {}
             fail_sid = t.get("stage") or "normalize"
-            if fail_sid not in {"inspect", "normalize", "chunk", "vectorize"}:
+            if fail_sid not in {"inspect", "normalize", "chunk", "vectorize", "complete"}:
                 fail_sid = "normalize"
             err_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()}"[:2000]
             fail_stage(task_id, fail_sid, err_detail)

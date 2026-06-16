@@ -13,7 +13,7 @@ from app.deps import get_current_user
 from app.llms import LLMStreamDelta, get_llm
 from app.models import ChatMessage, ChatSession, User
 from app.auth.rbac import get_user_roles
-from app.rag import build_prompt_messages, citations_from_docs, safe_retrieve_merged
+from app.rag import build_prompt_messages, citations_from_docs
 from app.schemas import ChatFaqApplyRequest, ChatStreamRequest
 from app.intent import get_recognizer
 from app.services.agent_pipeline import run_agent_pipeline
@@ -414,47 +414,8 @@ async def _produce_chat_stream(
 
         tenant_id = str(payload.kb_id) if payload.kb_id else str(user_id)
         auto_routed = False
-        if not payload.kb_id and pipeline.intent != "chitchat" and not pipeline.faq_answer:
-            try:
-                from app.models import KnowledgeDocument as KD
-                from app.models import KnowledgeBase
-
-                kbs = (
-                    stream_db.query(KnowledgeBase)
-                    .filter(
-                        KnowledgeBase.user_id == user_id,
-                        KnowledgeBase.status == 1,
-                    )
-                    .all()
-                )
-                if kbs and len(kbs) > 1:
-                    q_lower = (question or "").lower()
-                    q_kw = set(q_lower.split())
-                    kb_scores: list[tuple[int, float]] = []
-                    for kb in kbs:
-                        docs = (
-                            stream_db.query(KD)
-                            .filter(KD.kb_id == kb.id, KD.status == "ready")
-                            .all()
-                        )
-                        if not docs:
-                            kb_scores.append((kb.id, 0.0))
-                            continue
-                        hits = sum(
-                            1 for d in docs
-                            if any(kw in d.filename.lower() for kw in q_kw)
-                        )
-                        ratio = hits / len(docs) if docs else 0.0
-                        kb_scores.append((kb.id, ratio))
-                    kb_scores.sort(key=lambda x: x[1], reverse=True)
-                    if kb_scores[0][1] >= 0.1:
-                        tenant_id = str(kb_scores[0][0])
-                        auto_routed = True
-                    else:
-                        default = next((kb for kb in kbs if kb.is_default == 1), kbs[0])
-                        tenant_id = str(default.id)
-            except Exception:
-                pass
+        kb_route_meta: dict = {}
+        roles = get_user_roles(stream_db, user_id)
         anti_dilution_summary: str | None = None
         use_react = (
             settings.REACT_ENABLED
@@ -462,6 +423,26 @@ async def _produce_chat_stream(
             and not pipeline.faq_answer
             and is_complex_query(enriched_question or question)
         )
+        route_decision = None
+        if pipeline.intent != "chitchat" and not pipeline.faq_answer and use_react:
+            from app.services.kb_router import select_kb_route
+
+            route_decision = select_kb_route(
+                stream_db,
+                user_id,
+                question or enriched_question,
+                pipeline.rag_query or enriched_question,
+                roles=roles,
+                explicit_kb_id=payload.kb_id,
+                fallback_user_tenant=str(user_id),
+            )
+            tenant_id = route_decision.tenant_id
+            auto_routed = route_decision.routed and payload.kb_id is None
+            kb_route_meta = {
+                "kb_route_reason": route_decision.reason,
+                "kb_route_score": route_decision.route_score,
+                "kb_route_round": route_decision.round_index,
+            }
 
         if pipeline.intent != "chitchat" and not pipeline.faq_answer:
             await emit(_sse("status", {"text": "正在检索知识库..."}))
@@ -495,16 +476,69 @@ async def _produce_chat_stream(
                 "react_rag_calls": react_result.rag_call_count,
                 "react_steps": len(react_result.steps),
             }
+            if payload.kb_id is None and route_decision and route_decision.kb_id is not None:
+                from app.services.kb_router import retrieval_sufficient, select_kb_route
+                from app.rag import safe_retrieve_merged
+
+                sufficient, _top, _cnt = retrieval_sufficient(docs)
+                if not sufficient:
+                    secondary = select_kb_route(
+                        stream_db,
+                        user_id,
+                        question or enriched_question,
+                        pipeline.rag_query or enriched_question,
+                        roles=roles,
+                        exclude_kb_ids={route_decision.kb_id},
+                        round_index=1,
+                        fallback_user_tenant=str(user_id),
+                    )
+                    if secondary.kb_id and secondary.kb_id != route_decision.kb_id:
+                        fb_docs, fb_ad = await asyncio.to_thread(
+                            safe_retrieve_merged,
+                            pipeline.rag_query or enriched_question,
+                            secondary.tenant_id,
+                        )
+                        fb_ok, fb_top, fb_cnt = retrieval_sufficient(fb_docs)
+                        if fb_ok or fb_cnt > _cnt or fb_top > _top:
+                            docs = fb_docs
+                            anti_dilution_summary = fb_ad
+                            tenant_id = secondary.tenant_id
+                            auto_routed = True
+                            kb_route_meta = {
+                                **kb_route_meta,
+                                "kb_route_reason": secondary.reason,
+                                "kb_route_score": secondary.route_score,
+                                "kb_route_round": secondary.round_index,
+                                "kb_fallback_applied": True,
+                                "kb_primary_id": route_decision.kb_id,
+                            }
         elif pipeline.intent != "chitchat" and not pipeline.faq_answer:
-            docs, anti_dilution_summary = await asyncio.to_thread(
-                safe_retrieve_merged,
+            from app.services.kb_router import retrieve_with_kb_fallback
+
+            kb_result = await asyncio.to_thread(
+                retrieve_with_kb_fallback,
+                stream_db,
+                user_id,
+                question or enriched_question,
                 pipeline.rag_query or enriched_question,
-                tenant_id,
+                roles=roles,
+                explicit_kb_id=payload.kb_id,
+                allow_fallback=payload.kb_id is None,
             )
-            if not docs and question:
-                docs, anti_dilution_summary = await asyncio.to_thread(safe_retrieve_merged, question, tenant_id)
-                if not docs:
-                    docs, anti_dilution_summary = await asyncio.to_thread(safe_retrieve_merged, question, str(user_id))
+            docs = kb_result.docs
+            anti_dilution_summary = kb_result.anti_dilution_summary
+            tenant_id = kb_result.decision.tenant_id
+            auto_routed = (kb_result.decision.routed or kb_result.fallback_applied) and payload.kb_id is None
+            kb_route_meta = {
+                "kb_route_reason": kb_result.decision.reason,
+                "kb_route_score": kb_result.decision.route_score,
+                "kb_route_round": kb_result.decision.round_index,
+            }
+            if kb_result.fallback_applied:
+                kb_route_meta["kb_fallback_applied"] = True
+                kb_route_meta["kb_primary_id"] = (
+                    kb_result.primary_decision.kb_id if kb_result.primary_decision else None
+                )
             meta_react = {"react_mode": False}
 
         citations = citations_from_docs(docs)
@@ -528,8 +562,9 @@ async def _produce_chat_stream(
             "model_context_chars": ctx_pack.model_context_chars,
             "rolling_summary": bool(ctx_pack.rolling_summary),
             "anti_dilution": anti_dilution_summary is not None,
-            "kb_id": payload.kb_id or (int(tenant_id) if auto_routed else None),
+            "kb_id": payload.kb_id or (int(tenant_id) if tenant_id.isdigit() else None),
             "auto_routed": auto_routed,
+            **kb_route_meta,
             **meta_react,
             "pipeline": {
                 "source": pipeline.pipeline_source,
@@ -718,7 +753,7 @@ async def _produce_chat_stream(
             citations_count=len(citations),
             top_score=_top_score,
             anti_dilution=anti_dilution_summary is not None,
-            kb_id=payload.kb_id or (int(tenant_id) if auto_routed else None),
+            kb_id=payload.kb_id or (int(tenant_id) if str(tenant_id).isdigit() else None),
             auto_routed=auto_routed,
             llm_provider=node.provider if node else "",
             llm_model=node.model if node else "",

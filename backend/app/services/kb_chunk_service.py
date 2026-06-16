@@ -1,4 +1,4 @@
-"""RAG 知识库文档分块服务 — 对齐 web_rebuild_v2 全量切割策略。
+﻿"""RAG 知识库文档分块服务 — 全量切割策略。
 
 支持：
 - Chonkie：semantic / token / sentence / recursive / auto
@@ -40,7 +40,7 @@ SliceMode = Literal[
 
 _CHONKIE_MODES = frozenset({"semantic", "token", "sentence", "recursive", "auto"})
 
-# 对外展示目录（与 web_rebuild slice_method / chunk_mode 对齐）
+# 对外展示目录
 SLICE_METHOD_CATALOG: List[Dict[str, str]] = [
     {"id": "auto", "label": "自动", "group": "Chonkie", "description": "优先语义切割，不可用时递归降级"},
     {"id": "semantic", "label": "语义切割", "group": "Chonkie", "description": "Chonkie SemanticChunker，按语义主题切分"},
@@ -496,7 +496,7 @@ def chunk_text_with_meta(
     dynamic_max_chars: int = 800,
     source: str = "",
 ) -> Dict[str, Any]:
-    """与 web_rebuild chonkie_chunker.chunk_text_with_meta 返回结构兼容。"""
+    """返回统一的分块元数据结构。"""
     m = normalize_slice_mode(mode)
     pieces = split_text_to_chunks(
         text,

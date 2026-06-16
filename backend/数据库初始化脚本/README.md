@@ -27,7 +27,6 @@ Get-Content schema_full_v1.sql | mysql -h127.0.0.1 -P3306 -uroot -p
 | schema_full_v1.sql | **权威全量 DDL** |
 | init.sql | 新环境入口说明 |
 | migrate_*.sql | 历史增量脚本（供查阅/手工执行） |
-| legacy_ecommerce.sql | 已废弃电商演示，勿用于 haici_cs |
 | seed_kb/ | 样例 Markdown 知识库 |
 
 详细设计见 `docs/数据库设计.md`。

@@ -1,6 +1,6 @@
-"""Agent 网关服务 — LLM 网关节点管理 + 路由 + 连接测试。
+﻿"""Agent 网关服务 — LLM 网关节点管理 + 路由 + 连接测试。
 
-从 web_rebuild_v2 迁移，支持:
+支持:
 - 多 LLM 提供商网关节点 CRUD
 - 三种路由模式: system_compete / custom_order / strict_priority
 - 按任务类型路由 (task_type: qa / summary / reason)

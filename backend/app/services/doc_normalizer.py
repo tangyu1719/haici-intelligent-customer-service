@@ -824,8 +824,95 @@ def _normalize_pdf(
     document_title: str = "",
     task_id: str = "",
 ) -> NormalizationResult:
-    """PDF：MinerU 切图 → OCR/VLM → picture 块 → manifest（与 DOCX 下游一致）。"""
+    """PDF：流程图专用管道（CV+Mermaid）或 MinerU 切图 → OCR/VLM → picture 块。"""
+    from app.services.multimodal_task_manager import add_log, ensure_not_cancelled
+
     title = document_title or source.stem
+    fc_mode = (settings.PDF_FLOWCHART_PIPELINE or "auto").strip().lower()
+
+    if fc_mode in ("auto", "always"):
+        from app.services.flowchart_pdf_service import likely_flowchart_pdf, run_flowchart_pdf_pipeline
+
+        use_fc = fc_mode == "always" or likely_flowchart_pdf(source)
+        if use_fc:
+            ensure_not_cancelled(task_id)
+            if task_id:
+                add_log(
+                    task_id,
+                    "[流程图] 命中专用识别管道（MinerU+CV+箭头→Mermaid），开始处理…",
+                    "INFO",
+                )
+            try:
+                fc = run_flowchart_pdf_pipeline(
+                    source,
+                    asset_root,
+                    skip_llm=settings.PDF_FLOWCHART_SKIP_LLM,
+                    document_title=title,
+                )
+                if fc.get("ok"):
+                    fc_inspect = dict(inspect)
+                    fc_inspect["flowchart_pipeline"] = True
+                    fc_inspect["node_count"] = fc.get("node_count", 0)
+                    fc_inspect["edge_count"] = fc.get("edge_count", 0)
+                    fc_inspect["mermaid_block_count"] = fc.get("mermaid_block_count", 0)
+                    if task_id:
+                        add_log(
+                            task_id,
+                            f"[流程图] 完成：节点 {fc.get('node_count', 0)}，边 {fc.get('edge_count', 0)}，"
+                            f"Mermaid 块 {fc.get('mermaid_block_count', 0)}",
+                            "INFO",
+                        )
+                    return NormalizationResult(
+                        ok=True,
+                        text=str(fc.get("text") or ""),
+                        assets_dir=str(asset_root),
+                        manifest_path=str(fc.get("manifest_path") or ""),
+                        normalized_md_path=str(fc.get("normalized_md_path") or ""),
+                        inspect=fc_inspect,
+                        manifest=fc.get("manifest") or {},
+                    )
+                fc_err = str(fc.get("error") or "流程图管道失败")
+                if fc_mode == "always":
+                    return NormalizationResult(
+                        ok=False,
+                        text="",
+                        assets_dir=str(asset_root),
+                        manifest_path="",
+                        normalized_md_path="",
+                        inspect=inspect,
+                        manifest={},
+                        error=fc_err,
+                    )
+                logger.warning(
+                    "[RAG-文档标准化|doc_normalizer|pdf|Agent执行|流程图管道失败降级] source=%s; err=%s",
+                    source.name,
+                    fc_err[:300],
+                )
+                if task_id:
+                    add_log(task_id, f"[流程图] 管道失败，降级 MinerU 文本路径：{fc_err[:200]}", "WARN")
+            except TaskCancelledError:
+                raise
+            except Exception as exc:
+                fc_err = f"{type(exc).__name__}: {exc}"
+                if fc_mode == "always":
+                    return NormalizationResult(
+                        ok=False,
+                        text="",
+                        assets_dir=str(asset_root),
+                        manifest_path="",
+                        normalized_md_path="",
+                        inspect=inspect,
+                        manifest={},
+                        error=fc_err[:500],
+                    )
+                logger.warning(
+                    "[RAG-文档标准化|doc_normalizer|pdf|Agent执行|流程图管道异常降级] source=%s; err=%s",
+                    source.name,
+                    fc_err[:300],
+                )
+                if task_id:
+                    add_log(task_id, f"[流程图] 异常降级：{fc_err[:200]}", "WARN")
+
     mineru_err = ""
     try:
         md, mineru_dir = _mineru_to_text(source, asset_root)

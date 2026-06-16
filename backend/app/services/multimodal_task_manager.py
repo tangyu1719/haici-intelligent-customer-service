@@ -1,6 +1,6 @@
-"""多模态文档处理任务管理器 — 文件粒度任务+进度+日志+中间产物。
+﻿"""多模态文档处理任务管理器 — 文件粒度任务+进度+日志+中间产物。
 
-模仿 web_rebuild_v2/task_manager.py 的 Pipeline 任务模式。
+Pipeline 异步任务管理模式。
 每个上传的文档创建一个独立任务，跟踪所有处理步骤。
 """
 
@@ -218,9 +218,9 @@ def fail_stage(task_id: str, stage_id: str, error: str) -> None:
     stage["status"] = "failed"
     stage["error"] = error
     label = stage.get("label", stage_id)
-    update_task(task_id, status="failed", error=error,
+    update_task(task_id, status="failed", error=error[:2000],
                 error_stage=stage_id, stage_label=f"失败: {label}")
-    add_log(task_id, f"[失败] {label}: {error}", "ERROR")
+    add_log(task_id, f"[失败] {label}: {error[:2000]}", "ERROR")
 
 
 def add_log(task_id: str, message: str, level: str = "INFO") -> None:

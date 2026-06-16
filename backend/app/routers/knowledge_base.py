@@ -247,70 +247,29 @@ def auto_route_kb(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """自动路由：根据问题内容判断最相关的知识库。
+    """自动路由：权限过滤 → 向量探针智能选库。"""
+    from app.auth.rbac import get_user_roles
+    from app.services.kb_router import list_accessible_knowledge_bases, select_kb_route
 
-    优先匹配默认知识库，然后根据关键词匹配各知识库的文档名称。
-    """
-    question_lower = question.lower()
+    roles = get_user_roles(db, current_user.id)
+    accessible = list_accessible_knowledge_bases(db, current_user.id, roles)
+    if not accessible:
+        return {"ok": True, "kb_id": None, "kb_name": None, "routed": False, "reason": "无可访问知识库"}
 
-    kbs = (
-        db.query(KnowledgeBase)
-        .filter(
-            KnowledgeBase.user_id == current_user.id,
-            KnowledgeBase.status == 1,
-        )
-        .all()
+    decision = select_kb_route(
+        db,
+        current_user.id,
+        question,
+        question,
+        roles=roles,
+        fallback_user_tenant=str(current_user.id),
     )
-
-    if not kbs:
-        return {"ok": True, "kb_id": None, "kb_name": None, "routed": False}
-
-    # 只有一个知识库时直接返回
-    if len(kbs) == 1:
-        return {"ok": True, "kb_id": kbs[0].id, "kb_name": kbs[0].name, "routed": True}
-
-    # 多知识库时按文档关键词匹配度评分
-    kb_scores: list[tuple[int, str, float]] = []
-    for kb in kbs:
-        docs = (
-            db.query(KnowledgeDocument)
-            .filter(
-                KnowledgeDocument.kb_id == kb.id,
-                KnowledgeDocument.status == "ready",
-            )
-            .all()
-        )
-        if not docs:
-            kb_scores.append((kb.id, kb.name, 0.0))
-            continue
-
-        keyword_hits = sum(
-            1 for doc in docs
-            if any(kw in doc.filename.lower() for kw in question_lower.split())
-        )
-        hit_ratio = keyword_hits / len(docs)
-        kb_scores.append((kb.id, kb.name, hit_ratio))
-
-    kb_scores.sort(key=lambda x: x[2], reverse=True)
-    best_kb = kb_scores[0]
-
-    if best_kb[2] < 0.1:
-        # 所有知识库匹配度都低，使用默认知识库
-        default_kb = next((kb for kb in kbs if kb.is_default == 1), kbs[0])
-        return {
-            "ok": True,
-            "kb_id": default_kb.id,
-            "kb_name": default_kb.name,
-            "routed": False,
-            "score": 0.0,
-            "reason": "无明确匹配，使用默认知识库",
-        }
-
     return {
         "ok": True,
-        "kb_id": best_kb[0],
-        "kb_name": best_kb[1],
-        "routed": True,
-        "score": best_kb[2],
-        "all_scores": [(kid, name, round(s, 4)) for kid, name, s in kb_scores],
+        "kb_id": decision.kb_id,
+        "kb_name": decision.kb_name,
+        "routed": decision.routed,
+        "score": decision.route_score,
+        "reason": decision.reason,
+        "all_scores": decision.all_scores,
     }

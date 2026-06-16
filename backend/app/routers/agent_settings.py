@@ -1,6 +1,5 @@
-"""Agent 设置 API — Agent配置 + Agent网关
+﻿"""Agent 设置 API — Agent 配置 + Agent 网关
 
-对齐 web_rebuild_v2:
 - /api/settings/gateway-nodes    网关节点 CRUD
 - /api/settings/agent-routing     Agent 路由规则
 - /api/settings/agents-md/{key}   Agent Prompt 编辑

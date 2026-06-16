@@ -1,4 +1,4 @@
-"""RAG 预取切片规范化与 LLM 引用块（对齐 web_rebuild rag_slice_utils）。
+﻿"""RAG 预取切片规范化与 LLM 引用块（rag_slice_utils）。
 
 引用格式与插图规则已收敛到 prompt_segments 模块：
   - build_citation_format_block() → 完整引用格式指令

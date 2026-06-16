@@ -1,6 +1,6 @@
-"""多模态文档处理任务 API — 任务列表+进度+日志+SSE。
+﻿"""多模态文档处理任务 API — 任务列表+进度+日志+SSE。
 
-对齐 web_rebuild_v2 /api/process/queue 和 /api/process/logs/{task_id}
+/api/process/queue 和 /api/process/logs/{task_id}
 """
 
 from __future__ import annotations
@@ -303,9 +303,6 @@ def export_task_result(
     t = get_task(task_id)
     if not t or t.get("tenant_id") != current_user.id:
         raise HTTPException(status_code=404, detail="任务不存在")
-    if t.get("status") != "completed":
-        raise HTTPException(status_code=409, detail="任务尚未完成，无法导出")
-
     doc_id = t.get("document_id")
     candidates: list[Path] = []
     if fmt == "md":
@@ -318,6 +315,11 @@ def export_task_result(
             candidates.append(Path(t["output_txt"]))
         if doc_id:
             candidates.append(kb_assets_dir(current_user.id, doc_id) / "normalized.txt")
+
+    if t.get("status") != "completed":
+        has_artifact = any(p.is_file() for p in candidates)
+        if not has_artifact:
+            raise HTTPException(status_code=409, detail="任务尚未完成，无法导出")
 
     export_path: Path | None = None
     for p in candidates:

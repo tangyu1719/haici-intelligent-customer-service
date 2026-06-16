@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import json
 import logging
 import os
@@ -430,7 +430,7 @@ class LLMWrapper:
 
 
 
-        # 按模型实际上下文上限裁剪输入（上游 session_context 已做摘要+滑动窗口）
+        # 按模型实际上下文上限裁剪输入（session_context 已做摘要+滑动窗口）
         max_in, max_out = self._resolve_input_budget(node, task_type)
         trimmed = trim_messages_to_budget(messages, max_in)
 

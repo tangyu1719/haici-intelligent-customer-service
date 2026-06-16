@@ -1,4 +1,4 @@
-"""平台健康检查（对齐 web_rebuild /api/platform/health 响应形态）。"""
+﻿"""平台健康检查（/api/platform/health 响应形态）。"""
 
 from __future__ import annotations
 

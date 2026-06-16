@@ -1,4 +1,4 @@
-"""减重：使用进程内内存保存多轮上下文，不依赖 Redis。"""
+﻿"""使用进程内内存保存多轮上下文，不依赖 Redis。"""
 
 import logging
 from collections import defaultdict, deque

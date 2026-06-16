@@ -1,4 +1,4 @@
-"""文档处理服务 —— 对齐 web_rebuild + SPEC-RAG 标准化流水线。"""
+﻿"""文档处理服务 —— + SPEC-RAG 标准化流水线。"""
 from __future__ import annotations
 
 import logging
@@ -67,7 +67,7 @@ def _processor_fallback(file_path: str, *, doc_type_hint: str = "") -> Dict[str,
 
 
 def _chunk_preview(text: str, file_path: str, **kwargs) -> tuple[list, dict]:
-    """对齐 web_rebuild：可选分块预览。"""
+    """可选分块预览。"""
     chunk_mode = str(kwargs.get("slice_method") or kwargs.get("chunk_mode") or "auto")
     if not text.strip():
         return [], {"mode": chunk_mode, "count": 0}
@@ -176,7 +176,7 @@ def convert_document(
 
 
 def analyze_document(file_path: str, **kwargs) -> Dict[str, Any]:
-    """对齐 web_rebuild /api/doc/process：标准化正文 + 分块预览。"""
+    """/api/doc/process：标准化正文 + 分块预览。"""
     base = convert_document(
         file_path,
         tenant_id=kwargs.pop("tenant_id", 0),

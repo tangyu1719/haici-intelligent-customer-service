@@ -1,4 +1,4 @@
-"""LLM API 网关：对齐 SuperBizAgent api_gateway_nodes + task_type 路由。"""
+﻿"""LLM API 网关：对齐 SuperBizAgent api_gateway_nodes + task_type 路由。"""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class LLMGateway:
         self.nodes.clear()
         self.task_type_route = dict(settings.gateway_task_type_route_map)
 
-        # 1) 可选：从上级项目 config.json 加载节点池（与 web_rebuild_v2 一致）
+        # 1) 可选：从上级项目 config.json 加载节点池（与本系统一致）
         cfg_path = settings.resolved_gateway_config_path
         if cfg_path and cfg_path.is_file():
             try:

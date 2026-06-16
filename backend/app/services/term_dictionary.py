@@ -1,4 +1,4 @@
-"""内部业务术语映射（对齐 web_rebuild 轻量版）。"""
+﻿"""内部业务术语映射（轻量版）。"""
 
 from __future__ import annotations
 

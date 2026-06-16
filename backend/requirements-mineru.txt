@@ -1,6 +1,6 @@
-# MinerU 3.x 完整 PDF 切图 pipeline（含版面检测/表格，体积较大）
+﻿# MinerU 3.x 完整 PDF 切图 pipeline（含版面检测/表格，体积较大）
 # 安装：pip install -r requirements-mineru.txt
-# 说明：HaiChi 标准化链路在 MinerU 切图后统一走 doc_image_pipeline（OCR/VLM → picture 块 → manifest.json）
+# 说明：HaiCi 标准化链路在 MinerU 切图后统一走 doc_image_pipeline（OCR/VLM → picture 块 → manifest.json）
 
 -r requirements.txt
 

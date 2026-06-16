@@ -1,4 +1,4 @@
-"""用户反馈数据分析 + AI 评测 Agent。"""
+﻿"""用户反馈数据分析 + AI 评测 Agent。"""
 from __future__ import annotations
 
 import json
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 FEEDBACK_AI_PERSONA = {
     "agent_id": "feedback_analytics_agent",
     "display_name": "评测分析师 · 小析",
-    "role": "HaiChi 智能客服运维评测分析师",
+    "role": "HaiCi 智能客服运维评测分析师",
     "reply_style": "数据驱动、结构清晰、结论可执行",
     "layers": {
         "L0": "你是「小析」，专注用户反馈与意图数据的深度解读，语气专业但不生硬。",

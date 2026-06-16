@@ -1,4 +1,4 @@
-"""HaiChi 输出目录（对齐 web_rebuild output/ 布局）。"""
+﻿"""HaiCi 输出目录（output/ 布局）。"""
 
 from __future__ import annotations
 

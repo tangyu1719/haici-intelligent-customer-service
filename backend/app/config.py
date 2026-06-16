@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 from pathlib import Path
 
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     LLM_MODEL_QA: str = os.getenv("LLM_MODEL_QA", "")
     LLM_MODEL_REASON: str = os.getenv("LLM_MODEL_REASON", "")
 
-    # ── 网关路由（对齐 web_rebuild_v2 / src/agent/config.json） ──
+    # ── 网关路由（/ src/agent/config.json） ──
     GATEWAY_PROVIDER: str = os.getenv("GATEWAY_PROVIDER", "ark")
     GATEWAY_ROUTE_MODE: str = os.getenv("GATEWAY_ROUTE_MODE", "task_type")
     GATEWAY_TASK_TYPE_ROUTE: str = os.getenv("GATEWAY_TASK_TYPE_ROUTE", "")
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     CHAT_SESSION_MAX_MESSAGES: int = int(os.getenv("CHAT_SESSION_MAX_MESSAGES", "200"))
     USER_PROFILE_DIR: str = os.getenv("USER_PROFILE_DIR", "./data/user_profiles")
 
-    # ── 知识库分块（对齐 web_rebuild slice_method） ──
+    # ── 知识库分块（slice_method） ──
     KB_DEFAULT_SLICE_METHOD: str = os.getenv("KB_DEFAULT_SLICE_METHOD", "auto")
     KB_CHUNK_SIZE: int = int(os.getenv("KB_CHUNK_SIZE", "500"))
     KB_CHUNK_OVERLAP: int = int(os.getenv("KB_CHUNK_OVERLAP", "80"))
@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     VLM_IMAGE_ENABLED: bool = os.getenv("VLM_IMAGE_ENABLED", "true").lower() in ("1", "true", "yes")
     MAX_IMAGES_PER_DOC: int = int(os.getenv("MAX_IMAGES_PER_DOC", "30"))
     KB_NORMALIZE_ENABLED: bool = os.getenv("KB_NORMALIZE_ENABLED", "true").lower() in ("1", "true", "yes")
+    # PDF 流程图：auto=线框/文本启发式命中走 flowchart_service；always=一律走；never=仅 MinerU 文本
+    PDF_FLOWCHART_PIPELINE: str = os.getenv("PDF_FLOWCHART_PIPELINE", "auto")
+    PDF_FLOWCHART_SKIP_LLM: bool = os.getenv("PDF_FLOWCHART_SKIP_LLM", "true").lower() in ("1", "true", "yes")
     # 图片 OCR/VLM 并行（API 调用为主，适度并发可显著缩短标准化耗时）
     IMAGE_PROCESS_PARALLEL: bool = os.getenv("IMAGE_PROCESS_PARALLEL", "true").lower() in ("1", "true", "yes")
     # ── Ollama 本地模型(用于意图识别/Query 改写加速) ──

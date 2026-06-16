@@ -1,4 +1,4 @@
-"""多模态文档转化编排：PDF / DOCX / 图片 / 纯文本 / 流程图（对齐 SPEC + web_rebuild）。"""
+﻿"""多模态文档转化编排：PDF / DOCX / 图片 / 纯文本 / 流程图（对齐 SPEC-RAG 文档标准化）。"""
 from __future__ import annotations
 
 import uuid
