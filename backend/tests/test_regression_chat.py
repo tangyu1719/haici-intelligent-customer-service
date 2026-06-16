@@ -11,14 +11,11 @@ import json
 import pytest
 import requests
 
-BASE_URL = "http://127.0.0.1:8000/api/v1"
+from tests.http_regression_helpers import BASE_URL, collect_sse_text, login_password
 
 
 def _login():
-    resp = requests.post(f"{BASE_URL}/auth/login", json={"username": "admin", "password": "admin"})
-    if resp.status_code != 200:
-        pytest.skip("登录失败")
-    return resp.json()["access_token"]
+    return login_password()
 
 
 def _create_session(token: str) -> int:
@@ -68,25 +65,8 @@ class TestChatStream:
             stream=True,
         )
         assert resp.status_code == 200
-        content_parts: list[str] = []
-        buffer = ""
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            buffer += line + "\n"
-            if buffer.endswith("\n\n"):
-                for part in buffer.strip().split("\n\n"):
-                    for pline in part.split("\n"):
-                        if pline.startswith("data:"):
-                            try:
-                                data = json.loads(pline[5:].strip())
-                                if "content" in data:
-                                    content_parts.append(data["content"])
-                            except (json.JSONDecodeError, KeyError):
-                                pass
-                buffer = ""
-        full = "".join(content_parts)
-        # 验证回答不为空
+        full = collect_sse_text(resp)
+        # 验证回答不为空（token 流或 done.content）
         assert len(full) > 0
 
     def test_overlong_question_rejected(self):

@@ -17,9 +17,11 @@ from app.rag import build_prompt_messages, citations_from_docs, safe_retrieve_me
 from app.schemas import ChatFaqApplyRequest, ChatStreamRequest
 from app.intent import get_recognizer
 from app.services.agent_pipeline import run_agent_pipeline
+from app.services.react_agent import is_complex_query, run_react_rag, stream_react_final_answer
 from app.services.chat_attachment_context import enrich_question_with_attachments
 from app.services.agent_call_logger import set_agent_chain, set_agent_trace
-from app.services.chat_context import history_char_budget, rows_to_hist_dicts, select_history_messages
+from app.services.chat_context import history_char_budget, rows_to_hist_dicts
+from app.services.session_context_manager import inject_summary_prefix, prepare_session_context
 from app.services.chat_session_store import (
     persist_assistant_message_async,
     persist_user_message_async,
@@ -57,9 +59,9 @@ async def _emit_simulated_stream(text: str, chunk_size: int = 2, delay_s: float 
             await asyncio.sleep(delay_s)
 
 
-def _chitchat_messages(question: str, history: list[dict]) -> list[dict[str, str]]:
+def _chitchat_messages(question: str, history: list[dict], budget: int | None = None) -> list[dict[str, str]]:
     msgs: list[dict[str, str]] = [{"role": "system", "content": CHITCHAT_SYSTEM}]
-    budget = history_char_budget()
+    char_budget = budget if budget is not None else history_char_budget()
     used = len(CHITCHAT_SYSTEM) + len(question)
     picked: list[dict] = []
     for h in reversed(history):
@@ -67,7 +69,7 @@ def _chitchat_messages(question: str, history: list[dict]) -> list[dict[str, str
         if h.get("role") not in ("user", "assistant") or not content:
             continue
         clen = len(content)
-        if picked and used + clen > budget:
+        if picked and used + clen > char_budget:
             break
         picked.append({"role": h["role"], "content": content[: settings.MAX_QUESTION_LENGTH]})
         used += clen
@@ -100,6 +102,9 @@ def chat_config(db: Session = Depends(get_db), user: User = Depends(get_current_
         "context_reserve_chars": settings.CHAT_CONTEXT_RESERVE_CHARS,
         "history_char_budget": history_char_budget(),
         "max_history_turns": settings.CHAT_HISTORY_TURNS,
+        "sliding_window_turns": settings.CHAT_SLIDING_WINDOW_TURNS,
+        "summary_threshold_ratio": settings.CHAT_SUMMARY_THRESHOLD_RATIO,
+        "auto_summary_enabled": settings.CHAT_AUTO_SUMMARY_ENABLED,
         "faq_items": faq_items,
         **quota,
     }
@@ -265,8 +270,30 @@ async def _produce_chat_stream(
             return
 
         all_rows = _load_history_rows(stream_db, session_id_val)
-        hist_rows = select_history_messages(all_rows)
-        hist_dicts = rows_to_hist_dicts(hist_rows)
+        ctx_pack = prepare_session_context(stream_db, sess, all_rows, task_type="qa")
+        hist_dicts = inject_summary_prefix(ctx_pack.hist_dicts, ctx_pack.rolling_summary)
+
+        from app.services.user_profile_memory import get_profile_context_snippet
+
+        profile_snippet = get_profile_context_snippet(user_id)
+        if profile_snippet:
+            hist_dicts = [
+                {"role": "system", "content": f"【用户长期记忆画像】\n{profile_snippet}"},
+                *hist_dicts,
+            ]
+
+        # 更新会话上下文占用元数据
+        meta_patch = dict(sess.meta_json or {})
+        meta_patch["context_mode"] = ctx_pack.mode
+        meta_patch["context_usage_ratio"] = ctx_pack.usage_ratio
+        meta_patch["context_turn_count"] = ctx_pack.turn_count
+        sess.meta_json = meta_patch
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(sess, "meta_json")
+        try:
+            stream_db.commit()
+        except Exception:
+            stream_db.rollback()
 
         enriched_question, attachment_meta = await asyncio.to_thread(
             enrich_question_with_attachments, question, attachments
@@ -331,6 +358,13 @@ async def _produce_chat_stream(
                     assistant_message_id = await asyncio.wait_for(asyncio.shield(assistant_task), timeout=0.05)
                 except asyncio.TimeoutError:
                     pass
+                faq_follow_ups: list[str] = []
+                if answer and len(answer) >= 20:
+                    faq_follow_ups = await asyncio.to_thread(
+                        generate_follow_ups, question, answer, pipeline_intent
+                    )
+                if faq_follow_ups:
+                    await emit(_sse("follow_ups", {"items": faq_follow_ups}))
                 await emit(
                     _sse(
                         "done",
@@ -340,6 +374,7 @@ async def _produce_chat_stream(
                             "cached": True,
                             "faq_id": int(faq_hit.id),
                             "persist_async": assistant_message_id is None,
+                            "follow_ups": faq_follow_ups,
                         },
                     )
                 )
@@ -421,22 +456,56 @@ async def _produce_chat_stream(
             except Exception:
                 pass
         anti_dilution_summary: str | None = None
+        use_react = (
+            settings.REACT_ENABLED
+            and pipeline.intent != "chitchat"
+            and not pipeline.faq_answer
+            and is_complex_query(enriched_question or question)
+        )
 
         if pipeline.intent != "chitchat" and not pipeline.faq_answer:
             await emit(_sse("status", {"text": "正在检索知识库..."}))
 
         docs = []
-        if pipeline.intent != "chitchat" and not pipeline.faq_answer:
+        react_observations: list[str] = []
+        meta_react: dict = {"react_mode": False}
+        if use_react:
+            await emit(_sse("status", {"phase": "thinking", "text": "复杂问题，启动 ReAct 推理…"}))
+            await emit(_sse("meta", {"react_mode": True, "react_max_steps": settings.REACT_MAX_STEPS}))
+
+            async def _react_emit(event: str, data: dict) -> None:
+                await emit(_sse(event, data))
+
+            react_result = await run_react_rag(
+                enriched_question,
+                tenant_id,
+                hist_dicts,
+                pipeline.intent,
+                emit=_react_emit,
+                rolling_summary=ctx_pack.rolling_summary,
+                initial_rag_query=pipeline.rag_query or enriched_question,
+            )
+            docs = react_result.all_docs
+            anti_dilution_summary = react_result.anti_dilution_summary
+            react_observations = [
+                s.content for s in react_result.steps if s.phase == "observe"
+            ]
+            meta_react = {
+                "react_mode": True,
+                "react_rag_calls": react_result.rag_call_count,
+                "react_steps": len(react_result.steps),
+            }
+        elif pipeline.intent != "chitchat" and not pipeline.faq_answer:
             docs, anti_dilution_summary = await asyncio.to_thread(
                 safe_retrieve_merged,
                 pipeline.rag_query or enriched_question,
                 tenant_id,
             )
             if not docs and question:
-                from app.rag import retrieve_merged as _direct_retrieve
-                docs = await asyncio.to_thread(_direct_retrieve, question, tenant_id)
+                docs, anti_dilution_summary = await asyncio.to_thread(safe_retrieve_merged, question, tenant_id)
                 if not docs:
-                    docs = await asyncio.to_thread(_direct_retrieve, question, str(user_id))
+                    docs, anti_dilution_summary = await asyncio.to_thread(safe_retrieve_merged, question, str(user_id))
+            meta_react = {"react_mode": False}
 
         citations = citations_from_docs(docs)
         stream_citations = citations or None
@@ -453,10 +522,15 @@ async def _produce_chat_stream(
             "llm_node_name": node.name if node else "",
             "llm_model": node.model if node else "",
             "llm_task_type": task_type,
-            "context_budget_chars": history_char_budget(),
+            "context_budget_chars": ctx_pack.budget_chars,
+            "context_mode": ctx_pack.mode,
+            "context_usage_ratio": ctx_pack.usage_ratio,
+            "model_context_chars": ctx_pack.model_context_chars,
+            "rolling_summary": bool(ctx_pack.rolling_summary),
             "anti_dilution": anti_dilution_summary is not None,
             "kb_id": payload.kb_id or (int(tenant_id) if auto_routed else None),
             "auto_routed": auto_routed,
+            **meta_react,
             "pipeline": {
                 "source": pipeline.pipeline_source,
                 "rewritten_query": pipeline.rewritten_query,
@@ -508,7 +582,7 @@ async def _produce_chat_stream(
                 async for evt in _emit_simulated_stream(pipeline.faq_answer):
                     await emit(evt)
             elif pipeline.intent == "chitchat":
-                messages = _chitchat_messages(enriched_question, hist_dicts)
+                messages = _chitchat_messages(enriched_question, hist_dicts, ctx_pack.budget_chars)
                 async for delta in get_llm().stream_chat(messages, task_type=task_type):
                     if delta.kind == "think":
                         await _emit_thinking_status()
@@ -520,8 +594,30 @@ async def _produce_chat_stream(
                 parts.append(fallback)
                 async for evt in _emit_simulated_stream(fallback):
                     await emit(evt)
+            elif use_react:
+                async for delta in stream_react_final_answer(
+                    enriched_question,
+                    docs,
+                    hist_dicts,
+                    pipeline.intent,
+                    react_observations,
+                    anti_dilution_summary,
+                    ctx_pack.rolling_summary,
+                ):
+                    if delta.kind == "think":
+                        await _emit_thinking_status()
+                    elif delta.kind == "answer":
+                        await _emit_generating_status()
+                    await _emit_llm_delta(delta)
             else:
-                messages = build_prompt_messages(enriched_question, docs, hist_dicts, pipeline.intent, anti_dilution_summary)
+                messages = build_prompt_messages(
+                    enriched_question,
+                    docs,
+                    hist_dicts,
+                    pipeline.intent,
+                    anti_dilution_summary,
+                    ctx_pack.rolling_summary,
+                )
                 async for delta in get_llm().stream_chat(messages, task_type=task_type):
                     if delta.kind == "think":
                         await _emit_thinking_status()
@@ -529,18 +625,35 @@ async def _produce_chat_stream(
                         await _emit_generating_status()
                     await _emit_llm_delta(delta)
         except Exception as llm_exc:
-            from app.services.gateway_error_handler import normalize_error
-            err_str = str(llm_exc)[:500]
-            code, msg = normalize_error(
-                node.provider if node else "ark", 0, "", err_str
-            )
-            llm_error_code = code.value
-            logger.error("[RAG-LLM错误] code=%s msg=%s", llm_error_code, msg)
-            from app.services.gateway_circuit_breaker import breaker
-            breaker.handle_response(
-                node.id if node else "unknown",
-                node.provider if node else "ark", 500, "", err_str
-            )
+            from app.services.llm_error_recovery import LLMCallError
+
+            if isinstance(llm_exc, LLMCallError):
+                llm_error_code = llm_exc.error_code.value
+                msg = llm_exc.message
+                logger.error(
+                    "[RAG-LLM错误|chat|LLM|Agent执行|失败] code=%s; node=%s; msg=%s",
+                    llm_error_code,
+                    llm_exc.node_id,
+                    msg,
+                )
+            else:
+                from app.services.gateway_error_handler import normalize_error
+
+                err_str = str(llm_exc)[:500]
+                code, msg = normalize_error(
+                    node.provider if node else "ark", 0, "", err_str
+                )
+                llm_error_code = code.value
+                logger.error("[RAG-LLM错误] code=%s msg=%s", llm_error_code, msg)
+                from app.services.gateway_circuit_breaker import breaker
+
+                breaker.handle_response(
+                    node.id if node else "unknown",
+                    node.provider if node else "ark",
+                    500,
+                    "",
+                    err_str,
+                )
             parts.append(f"AI服务异常 [{llm_error_code}]: {msg}")
             await emit(_sse("token", {"content": parts[0]}))
 
@@ -562,6 +675,20 @@ async def _produce_chat_stream(
         except asyncio.TimeoutError:
             pass
 
+        follow_ups: list[str] = []
+        if (
+            not pipeline.faq_answer
+            and pipeline.intent not in ("chitchat",)
+            and answer
+            and len(answer) >= 20
+        ):
+            await emit(_sse("status", {"phase": "follow_ups", "text": "正在生成追问建议…"}))
+            follow_ups = await asyncio.to_thread(
+                generate_follow_ups, question or enriched_question, answer, pipeline.intent
+            )
+        if follow_ups:
+            await emit(_sse("follow_ups", {"items": follow_ups}))
+
         await emit(
             _sse(
                 "done",
@@ -570,22 +697,10 @@ async def _produce_chat_stream(
                     "content": answer,
                     "persist_async": assistant_message_id is None,
                     "error_code": llm_error_code,
+                    "follow_ups": follow_ups,
                 },
             )
         )
-
-        follow_ups: list[str] = []
-        if (
-            not pipeline.faq_answer
-            and pipeline.intent not in ("chitchat",)
-            and answer
-            and len(answer) >= 20
-        ):
-            follow_ups = await asyncio.to_thread(
-                generate_follow_ups, question or enriched_question, answer, pipeline.intent
-            )
-        if follow_ups:
-            await emit(_sse("follow_ups", {"items": follow_ups}))
 
         from app.services.agent_call_logger import log_rag_conversation
         _t_now = _time.time()
@@ -614,6 +729,29 @@ async def _produce_chat_stream(
             total_tokens=len(answer) // 2,
             time_consume_ms=int((_t_now - _t_start) * 1000),
         )
+
+        # 会话消息数达上限时自动归档并写入长期记忆
+        try:
+            from sqlalchemy import func
+            from app.services.session_context_manager import should_auto_archive
+            from app.services.user_profile_memory import archive_session_to_user_memory
+            from app.services.session_context_manager import mark_session_archived
+
+            stream_db.refresh(sess)
+            msg_count = (
+                stream_db.query(func.count(ChatMessage.id))
+                .filter(ChatMessage.session_id == session_id_val)
+                .scalar()
+                or 0
+            )
+            if should_auto_archive(sess, int(msg_count)):
+                await asyncio.to_thread(archive_session_to_user_memory, stream_db, sess, "auto_full")
+                await asyncio.to_thread(mark_session_archived, stream_db, sess, "auto_full")
+        except Exception as arch_exc:
+            logger.warning(
+                "[智能客服-上下文|chat.stream|auto_archive|硬编执行|失败] error_type=%s",
+                type(arch_exc).__name__,
+            )
 
     except Exception as exc:
         logger.exception(
@@ -677,10 +815,8 @@ async def stream_chat(payload: ChatStreamRequest, db: Session = Depends(get_db),
     event_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
 
     async def emit(evt: str) -> None:
-        try:
-            event_queue.put_nowait(evt)
-        except asyncio.QueueFull:
-            pass
+        # 阻塞入队，避免高频 token 时静默丢弃 follow_ups 等尾部事件
+        await event_queue.put(evt)
 
     async def producer() -> None:
         try:
