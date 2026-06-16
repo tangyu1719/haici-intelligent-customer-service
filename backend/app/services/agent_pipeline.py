@@ -7,7 +7,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.intent import IntentType, get_recognizer
+from app.intent import IntentType, get_recognizer, has_business_or_technical_signal
 from app.llms import get_llm
 from app.services.term_dictionary import INTENT_LABELS, map_retrieval_terms
 
@@ -27,6 +27,18 @@ class PipelineResult:
     rag_query: str = ""
     faq_answer: str = ""
     pipeline_source: str = "rule"  # rule | llm
+
+
+def _coerce_intent(intent: str, query: str, fallback: str) -> str:
+    """LLM/规则若误判 chitchat，含业务/技术信号时强制走 RAG。"""
+    code = (intent or fallback or "product_consult").strip()
+    if code == "chitchat" and has_business_or_technical_signal(query):
+        logger.info(
+            "[AI问答-Pipeline|agent_pipeline|意图纠正|硬编执行|降级] chitchat→product_consult; query=%s",
+            query[:80],
+        )
+        return "product_consult"
+    return code or fallback
 
 
 def _extract_keywords(text: str) -> list[str]:
@@ -54,7 +66,7 @@ def _rule_rewrite(query: str, history: list[dict]) -> str:
 def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
     from app.llms import get_pipeline_llm
 
-    # 优先用 Ollama(10s超时，失败自动降级)，否则走主网关
+    # 仅走本地 Ollama 快速预处理（3s 超时）；失败则规则链路，避免网关 LLM 阻塞首包（>40s）
     pipeline_node = get_pipeline_llm()
     if pipeline_node:
         try:
@@ -62,8 +74,8 @@ def _llm_preprocess(query: str, history: list[dict]) -> dict | None:
             if result:
                 return result
         except Exception:
-            logger.warning("[AI问答-Pipeline|Ollama|超时/失败|降级至网关]")
-    return _call_llm_default(query, history)
+            logger.warning("[AI问答-Pipeline|Ollama|超时/失败|降级至规则]")
+    return None
 
 
 def _call_llm_with_node(node, query: str, history: list[dict], timeout: float = 10.0) -> dict | None:
@@ -139,8 +151,8 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
             pipeline_source="rule",
         )
 
-    # 闲聊不走 LLM 预处理，避免多轮简单对话卡在「正在理解...」
-    if rule_intent.intent == IntentType.CHITCHAT:
+    # 闲聊不走 LLM 预处理，避免多轮简单对话卡在「正在理解...」（须无业务/技术信号）
+    if rule_intent.intent == IntentType.CHITCHAT and not has_business_or_technical_signal(q):
         return PipelineResult(
             original_query=q,
             intent=rule_intent.intent.value,
@@ -151,7 +163,19 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
 
     llm_data = _llm_preprocess(q, history)
     if llm_data:
-        intent = str(llm_data.get("intent") or rule_intent.intent.value)
+        intent = _coerce_intent(
+            str(llm_data.get("intent") or rule_intent.intent.value),
+            q,
+            rule_intent.intent.value,
+        )
+        if intent == "chitchat":
+            return PipelineResult(
+                original_query=q,
+                intent=intent,
+                intent_label=INTENT_LABELS.get(intent, intent),
+                rewritten_query=q,
+                pipeline_source="llm",
+            )
         rewritten = str(llm_data.get("rewritten_query") or q).strip()
         keywords = [str(x) for x in (llm_data.get("query_keywords") or []) if x][:8]
         terms = [str(x) for x in (llm_data.get("retrieval_terms") or []) if x][:12]
@@ -176,7 +200,7 @@ def run_agent_pipeline(query: str, history: list[dict] | None = None) -> Pipelin
     keywords = _extract_keywords(q)
     terms = map_retrieval_terms(q, keywords)
     rag_query = " ".join(dict.fromkeys([rewritten, *keywords, *terms]))
-    intent = rule_intent.intent.value
+    intent = _coerce_intent(rule_intent.intent.value, q, "product_consult")
 
     return PipelineResult(
         original_query=q,
