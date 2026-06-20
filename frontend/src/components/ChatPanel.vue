@@ -903,7 +903,21 @@ const sendMessage = async (forcedText?: string): Promise<void> => {
           appendThinkToken(bot, data.content || '')
           scrollToBottom()
         }
+        if (event === 'cached') {
+          flushPendingThink(true)
+          pendingTokenChunks.length = 0
+          tokenFlushScheduled = false
+          const text = String(data.content || '')
+          bot.content = text
+          bot.isCachedReply = true
+          bot.cachedSource = String(data.source || '')
+          bot.isStreaming = false
+          bot.phaseStatus = ''
+          saveStreamDraft(sessionId.value, bot)
+          scrollToBottom()
+        }
         if (event === 'token') {
+          bot.isCachedReply = false
           appendStreamToken(bot, data.content || '')
         }
         if (event === 'citations') {

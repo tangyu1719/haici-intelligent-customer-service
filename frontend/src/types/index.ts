@@ -39,6 +39,9 @@ export interface ChatMessage {
   ragCitationAnnotations?: RagCitationAnnotation[]
   answerBody?: string
   isStreaming?: boolean
+  /** 非 LLM 流式：FAQ/规则兜底一次性 cached 事件 */
+  isCachedReply?: boolean
+  cachedSource?: string
   messageId?: number | null
   image?: string
   attachments?: ChatAttachment[]

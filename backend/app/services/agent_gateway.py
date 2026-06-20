@@ -9,18 +9,17 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from app.logging_utils import mask_secret
+from app.services.gateway_config_store import (
+    load_raw_gateway_config,
+    save_raw_gateway_config,
+)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_GATEWAY_CONFIG = PROJECT_ROOT / "src" / "agent" / "config.json"
-LOCAL_GATEWAY_CONFIG = PROJECT_ROOT / "backend" / "data" / "agent_gateway_config.json"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,6 +51,14 @@ class GatewayNode:
             "status": self.status,
             "tags": self.tags,
         }
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """API 响应用：密钥脱敏。"""
+        d = self.to_dict()
+        hint = mask_secret(self.api_key)
+        d["api_key"] = hint
+        d["api_key_hint"] = hint
+        return d
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GatewayNode":
@@ -112,22 +119,11 @@ class GatewayConfig:
 
 
 def _load_config_file() -> dict[str, Any]:
-    """加载网关配置文件（本地优先，其次上级项目）"""
-    for path in (LOCAL_GATEWAY_CONFIG, DEFAULT_GATEWAY_CONFIG):
-        if path.is_file():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
-    return {}
+    return load_raw_gateway_config()
 
 
 def _save_config_file(data: dict[str, Any]) -> None:
-    LOCAL_GATEWAY_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    LOCAL_GATEWAY_CONFIG.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    save_raw_gateway_config(data)
 
 
 def load_gateway_config() -> GatewayConfig:
@@ -161,6 +157,8 @@ def upsert_gateway_node(node_dict: dict[str, Any]) -> GatewayNode:
     found = False
     for i, n in enumerate(cfg.nodes):
         if n.id == new_node.id:
+            if not (new_node.api_key or "").strip():
+                new_node.api_key = n.api_key
             cfg.nodes[i] = new_node
             found = True
             break

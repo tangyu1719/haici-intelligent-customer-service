@@ -4,9 +4,16 @@ __pycache__/
 .venv/
 venv/
 backend/.venv/
+backend/.pytest_tmp/
 backend/data/uploads/*
 !backend/data/uploads/.gitkeep
 backend/data/chroma/
+backend/data/agent_gateway_config.json
+backend/data/system_settings.json
+backend/data/user_profiles/*
+!backend/data/user_profiles/.gitkeep
+backend/data/multimodal_tasks.json
+!backend/data/multimodal_tasks.example.json
 node_modules/
 frontend/dist/
 .tools/
@@ -15,3 +22,7 @@ frontend/dist/
 .run/
 .idea/
 .vscode/
+
+# 运行时产物与业务文档资产（勿提交 Git）
+output/*
+!output/.gitkeep

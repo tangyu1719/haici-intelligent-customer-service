@@ -1,0 +1,20 @@
+{
+  "gateway_route_mode": "task_type",
+  "gateway_task_type_route": {},
+  "api_gateway_nodes": [
+    {
+      "id": "node_ark_qa_example",
+      "name": "问答接入点（示例）",
+      "provider": "ark",
+      "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+      "api_key": "your-ark-api-key",
+      "endpoint_id": "ep-xxxxxxxx",
+      "model": "DeepSeek-V4-flash",
+      "priority": 1,
+      "weight": 100,
+      "status": "active",
+      "tags": ["qa", "chat"]
+    }
+  ],
+  "agent_route_rules": {}
+}

@@ -10,10 +10,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 上级项目 knowledge_base 默认缓存目录（与 kb_manager_fast.py 一致）
+# 上级 knowledge_base 默认缓存目录（monorepo 可选）
 DEFAULT_KB_MODELS_DIR = (
     settings.project_root.parent / "src" / "agent" / "knowledge_base" / "models"
 ).resolve()
+LOCAL_MODELS_DIR = (settings.project_root / "backend" / "data" / "models").resolve()
 
 HUB_FOLDERS = (
     "models--BAAI--bge-large-zh-v1.5",
@@ -48,13 +49,17 @@ def resolve_embedding_model_path() -> Path | None:
         if (p / "config.json").is_file():
             return p
 
-    search_dirs = [DEFAULT_KB_MODELS_DIR]
+    search_dirs: list[Path] = [LOCAL_MODELS_DIR]
     extra = (settings.EMBEDDING_MODEL_CACHE_DIR or "").strip()
     if extra:
         p = Path(extra)
         if not p.is_absolute():
             p = (settings.project_root / p).resolve()
-        search_dirs.insert(0, p)
+        if p not in search_dirs:
+            search_dirs.insert(0, p)
+
+    if DEFAULT_KB_MODELS_DIR.is_dir() and DEFAULT_KB_MODELS_DIR not in search_dirs:
+        search_dirs.append(DEFAULT_KB_MODELS_DIR)
 
     for cache_dir in search_dirs:
         if not cache_dir.is_dir():

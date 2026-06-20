@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     GATEWAY_PROVIDER: str = os.getenv("GATEWAY_PROVIDER", "ark")
     GATEWAY_ROUTE_MODE: str = os.getenv("GATEWAY_ROUTE_MODE", "task_type")
     GATEWAY_TASK_TYPE_ROUTE: str = os.getenv("GATEWAY_TASK_TYPE_ROUTE", "")
-    LLM_GATEWAY_CONFIG: str = os.getenv("LLM_GATEWAY_CONFIG", "../src/agent/config.json")
+    LLM_GATEWAY_CONFIG: str = os.getenv("LLM_GATEWAY_CONFIG", "")
 
     # 兼容旧版单接入点
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_PATH: str = os.getenv("EMBEDDING_MODEL_PATH", os.getenv("SBA_BGE_SNAPSHOT_PATH", ""))
     EMBEDDING_MODEL_CACHE_DIR: str = os.getenv(
         "EMBEDDING_MODEL_CACHE_DIR",
-        "../src/agent/knowledge_base/models",
+        "backend/data/models",
     )
 
     MYSQL_HOST: str = os.getenv("MYSQL_HOST", "127.0.0.1")

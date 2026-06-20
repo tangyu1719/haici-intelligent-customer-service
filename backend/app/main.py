@@ -31,6 +31,7 @@ from app.routers import (
 )
 from app.auth.bootstrap import ensure_auth_ready
 from app.middleware.audit_middleware import AuditCasbinMiddleware
+from app.middleware.kb_assets_auth import KbAssetsAuthMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 settings.ensure_dirs()
@@ -50,6 +51,7 @@ app.add_middleware(
 )
 
 app.add_middleware(AuditCasbinMiddleware)
+app.add_middleware(KbAssetsAuthMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(admin_logs.router, prefix="/api/v1")
@@ -80,9 +82,11 @@ app.mount("/output", StaticFiles(directory=str(_OUTPUT_DIR)), name="output")
 @app.on_event("startup")
 def on_startup() -> None:
     from app.database import engine
+    from app.services.gateway_config_store import ensure_local_gateway_file_from_example
     from app.services.sql_trace import register_sql_listeners
 
     _log = logging.getLogger(__name__)
+    ensure_local_gateway_file_from_example()
     register_sql_listeners(engine)
     ensure_auth_ready()
 
@@ -113,4 +117,19 @@ async def serve_frontend():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    from app.services.platform_health import _probe_chroma, _probe_embedding, _probe_mysql
+
+    items = [_probe_mysql(), _probe_chroma(), _probe_embedding()]
+    summary = {"ok": 0, "warn": 0, "error": 0}
+    for it in items:
+        st = str(it.get("status") or "error")
+        if st in summary:
+            summary[st] += 1
+        else:
+            summary["error"] += 1
+    return {
+        "status": "ok" if summary["error"] == 0 else "degraded",
+        "ready": summary["error"] == 0,
+        "summary": summary,
+        "items": items,
+    }

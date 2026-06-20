@@ -523,6 +523,7 @@ const scrollToFeedback = (): void => {
 
     <div class="msg-answer-card msg-bubble msg-bubble--assistant">
       <div v-if="showMsgMeta" class="msg-meta-row">
+        <span v-if="msg.isCachedReply" class="msg-meta-cached">缓存直出</span>
         <span v-if="msg.intent || msg.intentLabel" class="msg-meta-intent">意图识别：{{ intentText }}</span>
         <span v-if="answerTime && !msg.isStreaming" class="msg-meta-time">回答时间 {{ answerTime }}</span>
       </div>
@@ -914,6 +915,14 @@ const scrollToFeedback = (): void => {
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px solid rgba(54, 62, 66, 0.1);
+}
+.msg-meta-cached {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0d9488;
+  background: rgba(13, 148, 136, 0.1);
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 .msg-meta-intent {
   font-size: 11px;

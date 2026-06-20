@@ -92,6 +92,8 @@ def collect_sse_text(resp: requests.Response) -> str:
             continue
         if current_event == "token" and data.get("content"):
             parts.append(str(data["content"]))
+        elif current_event == "cached" and data.get("content"):
+            parts.append(str(data["content"]))
         elif current_event == "done" and data.get("content"):
             parts.append(str(data["content"]))
     return "".join(parts)

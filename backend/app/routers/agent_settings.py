@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field
 from app.deps import get_current_user
 from app.services.agent_gateway import (
     GatewayNode,
-    choose_node,
     delete_gateway_node,
     list_agent_routing,
     list_gateway_nodes,
@@ -143,16 +142,16 @@ def post_agent_routing(body: AgentRoutingSaveBody, _user=Depends(get_current_use
 
 @router.get("/gateway-nodes")
 def get_gateway_nodes(_user=Depends(get_current_user)):
-    """获取所有网关节点列表"""
+    """获取所有网关节点列表（密钥脱敏）"""
     nodes = list_gateway_nodes()
-    return {"nodes": [n.to_dict() for n in nodes]}
+    return {"nodes": [n.to_public_dict() for n in nodes]}
 
 
 @router.post("/gateway-nodes/upsert")
 def post_gateway_node(body: GatewayNodeBody, _user=Depends(get_current_user)):
     """创建或更新网关节点"""
     node = upsert_gateway_node(body.model_dump())
-    return {"ok": True, "node": node.to_dict()}
+    return {"ok": True, "node": node.to_public_dict()}
 
 
 @router.delete("/gateway-nodes/{node_id}")
@@ -168,7 +167,7 @@ def delete_gateway_node_ep(node_id: str, _user=Depends(get_current_user)):
 def reorder_gateway_nodes_ep(body: ReorderBody, _user=Depends(get_current_user)):
     """重新排序网关节点（priority 按顺序赋值）"""
     nodes = reorder_gateway_nodes(body.node_ids)
-    return {"ok": True, "nodes": [n.to_dict() for n in nodes]}
+    return {"ok": True, "nodes": [n.to_public_dict() for n in nodes]}
 
 
 # ── 连接测试 ───────────────────────────────────────────────
@@ -192,26 +191,10 @@ def test_llm_connection(body: TestConnectionBody, _user=Depends(get_current_user
 
 @router.get("/gateway-snapshot")
 def gateway_snapshot(_user=Depends(get_current_user)):
-    """获取 LLM 网关运行快照"""
+    """获取 LLM 网关运行快照（与运行时 llm_gateway 一致，密钥脱敏）"""
     from app.services.llm_gateway import get_llm_gateway
 
-    gw = get_llm_gateway()
-    nodes = list_gateway_nodes()
-
-    # 选一个默认节点测试
-    chosen_qa = choose_node("qa")
-    chosen_summary = choose_node("summary")
-
-    return {
-        "route_mode": gw.route_mode,
-        "task_type_route": {
-            "qa": chosen_qa.to_dict() if chosen_qa else None,
-            "summary": chosen_summary.to_dict() if chosen_summary else None,
-        },
-        "nodes": [n.to_dict() for n in nodes],
-        "node_count": len([n for n in nodes if n.status == "active"]),
-        "total_nodes": len(nodes),
-    }
+    return get_llm_gateway().public_snapshot()
 
 
 # ── 熔断器与节点健康 ─────────────────────────────────────────

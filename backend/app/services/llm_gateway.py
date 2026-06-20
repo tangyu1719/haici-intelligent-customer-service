@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.logging_utils import mask_secret
+from app.services.gateway_config_store import load_raw_gateway_config
 from app.services.model_context_registry import (
     lookup_context_chars,
     lookup_context_tokens,
@@ -52,26 +54,18 @@ class LLMGateway:
         self.nodes.clear()
         self.task_type_route = dict(settings.gateway_task_type_route_map)
 
-        # 1) 可选：从上级项目 config.json 加载节点池（与本系统一致）
-        cfg_path = settings.resolved_gateway_config_path
-        if cfg_path and cfg_path.is_file():
-            try:
-                raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-                self._merge_runtime_config(raw)
-                if raw.get("gateway_route_mode"):
-                    self.route_mode = str(raw["gateway_route_mode"]).strip().lower()
-                logger.info(
-                    "[智能客服-LLM|llm_gateway|配置|硬编执行|加载] 已合并上级 config.json; path=%s; nodes=%s",
-                    cfg_path,
-                    len(self.nodes),
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[智能客服-LLM|llm_gateway|配置|硬编执行|加载] 上级 config 解析失败; error=%s",
-                    exc,
-                )
+        # 1) 单一配置源：backend/data/agent_gateway_config.json（或 .env 指定的上级 config）
+        raw = load_raw_gateway_config()
+        if raw:
+            self._merge_runtime_config(raw)
+            if raw.get("gateway_route_mode"):
+                self.route_mode = str(raw["gateway_route_mode"]).strip().lower()
+            logger.info(
+                "[智能客服-LLM|llm_gateway|配置|硬编执行|加载] 已合并网关配置; nodes=%s",
+                len(self.nodes),
+            )
 
-        # 2) 环境变量构建默认节点（通义 + 方舟双接入点）
+        # 2) 环境变量补充节点（.env 自洽启动，不覆盖 JSON 已有节点）
         self._ensure_env_nodes()
         self._bind_all_node_contexts()
 
@@ -261,13 +255,13 @@ class LLMGateway:
                     "name": n.name,
                     "provider": n.provider,
                     "base_url": n.base_url,
-                    "model": n._mask_model(n.model),
+                    "model": _mask_model(n.model),
                     "priority": n.priority,
                     "status": n.status,
                     "tags": n.tags,
                     "context_tokens": n.context_tokens,
                     "context_chars": n.context_chars,
-                    "api_key_hint": n._mask_secret(n.api_key),
+                    "api_key_hint": mask_secret(n.api_key),
                 }
             )
         chat_node = self.choose("qa")
@@ -278,19 +272,12 @@ class LLMGateway:
                 "node_id": chat_node.id if chat_node else "",
                 "name": chat_node.name if chat_node else "",
                 "provider": chat_node.provider if chat_node else "",
-                "model": chat_node._mask_model(chat_node.model) if chat_node else "",
+                "model": _mask_model(chat_node.model) if chat_node else "",
                 "base_url": chat_node.base_url if chat_node else "",
                 "context_chars": chat_node.context_chars if chat_node else 0,
             },
             "nodes": nodes,
         }
-
-
-def _mask_secret(value: str) -> str:
-    v = (value or "").strip()
-    if len(v) <= 8:
-        return "***" if v else ""
-    return f"{v[:4]}...{v[-4:]}"
 
 
 def _mask_model(value: str) -> str:
@@ -300,10 +287,17 @@ def _mask_model(value: str) -> str:
     return f"{v[:8]}...{v[-4:]}"
 
 
-GatewayNode._mask_secret = staticmethod(_mask_secret)  # type: ignore[attr-defined]
-GatewayNode._mask_model = staticmethod(_mask_model)  # type: ignore[attr-defined]
-
 _gateway: LLMGateway | None = None
+
+
+def reload_llm_gateway() -> LLMGateway:
+    """管理端保存配置后热重载运行时网关。"""
+    global _gateway
+    if _gateway is None:
+        _gateway = LLMGateway()
+    else:
+        _gateway._load()
+    return _gateway
 
 
 def get_llm_gateway() -> LLMGateway:

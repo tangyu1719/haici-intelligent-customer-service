@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  backend-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt pytest
+      - name: Unit tests (no live DB)
+        run: |
+          cd backend
+          pytest tests/test_structured_json_bad_cases.py \
+            tests/test_gateway_config_unified.py \
+            tests/test_chat_sse_cached.py \
+            tests/test_health_extended.py \
+            tests/test_regression_gateway.py \
+            -q --tb=short
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

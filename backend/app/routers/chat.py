@@ -48,15 +48,19 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-async def _emit_simulated_stream(text: str, chunk_size: int = 2, delay_s: float = 0.035) -> AsyncIterator[str]:
-    content = text or ""
+async def _emit_cached_answer(answer: str, source: str) -> AsyncIterator[str]:
+    """缓存/规则兜底：一次性 cached 事件，非 LLM token 流。"""
+    content = (answer or "").strip()
     if not content:
         return
-    step = max(1, chunk_size)
-    for i in range(0, len(content), step):
-        yield _sse("token", {"content": content[i:i + step]})
-        if i + step < len(content):
-            await asyncio.sleep(delay_s)
+    yield _sse(
+        "cached",
+        {
+            "content": content,
+            "source": source,
+            "streaming": False,
+        },
+    )
 
 
 def _chitchat_messages(question: str, history: list[dict], budget: int | None = None) -> list[dict[str, str]]:
@@ -342,7 +346,7 @@ async def _produce_chat_stream(
                         },
                     )
                 )
-                async for evt in _emit_simulated_stream(answer):
+                async for evt in _emit_cached_answer(answer, "faq_cache"):
                     await emit(evt)
                 assistant_task = schedule_persist_assistant(
                     session_id=session_id_val,
@@ -615,7 +619,7 @@ async def _produce_chat_stream(
         try:
             if pipeline.faq_answer:
                 parts.append(pipeline.faq_answer)
-                async for evt in _emit_simulated_stream(pipeline.faq_answer):
+                async for evt in _emit_cached_answer(pipeline.faq_answer, "faq_rule"):
                     await emit(evt)
             elif pipeline.intent == "chitchat":
                 messages = _chitchat_messages(enriched_question, hist_dicts, ctx_pack.budget_chars)
@@ -628,7 +632,7 @@ async def _produce_chat_stream(
             elif not docs:
                 fallback = settings.FALLBACK_NO_CONTEXT
                 parts.append(fallback)
-                async for evt in _emit_simulated_stream(fallback):
+                async for evt in _emit_cached_answer(fallback, "rule_fallback"):
                     await emit(evt)
             elif use_react:
                 async for delta in stream_react_final_answer(
